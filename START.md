@@ -92,3 +92,10 @@ Verifique:
 - para rotina diaria, use `agendador-envios.js`
 - o dashboard le `data/disparos-log.json`
 - o status do WhatsApp e publicado em `data/whatsapp-status.json`
+
+## Notas das correcoes recentes
+
+- alternancia de envio ajustada para Shopee/ML em loop 1x1 quando ambos marketplaces estao disponiveis
+- filtro anti-repeticao revisado para evitar supressao excessiva de ofertas do Mercado Livre
+- em caso de travamento, limpe `data/disparo-global.lock` antes de reiniciar o agendador
+- monitor de encerramento diario permanece em 17:00 via `scripts/encerrar-12h-e-relatorio.ps1`

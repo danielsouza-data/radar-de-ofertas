@@ -344,6 +344,15 @@ function normalizarTexto(valor) {
     .replace(/\s+/g, ' ');
 }
 
+function ehMarketplaceMercadoLivre(marketplace) {
+  const m = normalizarTexto(marketplace);
+  return m.includes('mercado livre') || m === 'ml';
+}
+
+function ehMarketplaceShopee(marketplace) {
+  return normalizarTexto(marketplace).includes('shopee');
+}
+
 function carregarHistoricoDisparos() {
   try {
     if (!fs.existsSync(LOG_DISPAROS)) {
@@ -382,8 +391,14 @@ function filtrarOfertasNaoEnviadas(ofertasLista) {
     const ofertaProduto = normalizarTexto(oferta?.product_name);
     const produtoKey = `${ofertaMarketplace}|${ofertaProduto}`;
 
+    // Regra de negocio: manter ML sempre elegivel para sustentar alternancia 1x1
+    // entre Shopee e Mercado Livre no loop de envio.
+    if (ehMarketplaceMercadoLivre(ofertaMarketplace)) return true;
+
     if (ofertaLink && seenLinks.has(ofertaLink)) return false;
-    if (ofertaMarketplace && ofertaProduto && seenProdutos.has(produtoKey)) return false;
+    if (ofertaMarketplace && ofertaProduto && seenProdutos.has(produtoKey)) {
+      return false;
+    }
 
     return true;
   });
@@ -393,6 +408,41 @@ function filtrarOfertasNaoEnviadas(ofertasLista) {
     console.log(`[ANTI-REPETICAO] ${removidas} oferta(s) removida(s) por ja terem sido enviadas`);
   } else {
     console.log('[ANTI-REPETICAO] Nenhuma oferta repetida encontrada no log de disparos');
+  }
+
+  const filaShopee = [];
+  const filaMercadoLivre = [];
+  const filaOutros = [];
+
+  filtradas.forEach((oferta) => {
+    if (ehMarketplaceShopee(oferta?.marketplace)) {
+      filaShopee.push(oferta);
+      return;
+    }
+
+    if (ehMarketplaceMercadoLivre(oferta?.marketplace)) {
+      filaMercadoLivre.push(oferta);
+      return;
+    }
+
+    filaOutros.push(oferta);
+  });
+
+  // Alternância estrita Shopee -> ML quando os dois marketplaces estão disponíveis.
+  if (filaShopee.length > 0 && filaMercadoLivre.length > 0) {
+    const alternadas = [];
+    const maxLen = Math.max(filaShopee.length, filaMercadoLivre.length);
+
+    for (let i = 0; i < maxLen; i++) {
+      if (filaShopee[i]) alternadas.push(filaShopee[i]);
+      if (filaMercadoLivre[i]) alternadas.push(filaMercadoLivre[i]);
+    }
+
+    if (filaOutros.length > 0) {
+      alternadas.push(...intercalarOfertasPorMarketplace(filaOutros));
+    }
+
+    return alternadas;
   }
 
   return intercalarOfertasPorMarketplace(filtradas);

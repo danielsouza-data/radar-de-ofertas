@@ -72,3 +72,27 @@ node disparo-completo.js
 - Ofertas sem imagem sao puladas automaticamente
 - O dashboard le os logs locais e o status do WhatsApp
 - A sessao autenticada fica salva em `.wwebjs_sessions/producao/`
+
+## Atualizacoes recentes (Mar/2026)
+
+- Portabilidade de paths centralizada em `src/config/paths.js`
+- Dashboard e scripts principais migrados para `PATHS` (sem hardcode de `C:\\Users\\...`)
+- Encerramento automatico ajustado para 17:00 com monitor `scripts/encerrar-12h-e-relatorio.ps1`
+- Correcao de lock residual: `data/disparo-global.lock` agora e limpo no reinicio operacional
+- Balanceamento de marketplaces no envio: alternancia 1x1 entre Shopee e Mercado Livre quando ambos existem no lote
+- Anti-repeticao ajustado para nao suprimir em excesso ofertas do Mercado Livre
+
+### Funcoes novas/ajustadas no envio (`disparo-completo.js`)
+
+- `ehMarketplaceMercadoLivre(marketplace)`: identifica variantes de nome do marketplace ML
+- `ehMarketplaceShopee(marketplace)`: identifica Shopee de forma padronizada
+- `filtrarOfertasNaoEnviadas(...)`: agora preserva elegibilidade de ML e aplica alternancia Shopee -> ML no retorno final
+
+### Resultado esperado em runtime
+
+- Com Shopee + ML disponiveis no ciclo, os envios seguem o loop:
+	1. Shopee
+	2. Mercado Livre
+	3. Shopee
+	4. Mercado Livre
+- O dashboard continua atualizado por `data/disparos-log.json` e `data/whatsapp-status.json`
