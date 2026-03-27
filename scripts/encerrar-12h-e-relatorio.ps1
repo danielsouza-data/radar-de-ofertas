@@ -44,6 +44,7 @@ $targets = Get-CimInstance Win32_Process |
   Where-Object {
     ($_.Name -match 'powershell.exe|pwsh.exe|node.exe') -and (
       ($_.CommandLine -like '*LOOP-5M-12H*') -or
+      ($_.CommandLine -like '*agendador-envios.js*') -or
       ($_.CommandLine -like '*disparo-completo.js*') -or
       ($_.CommandLine -like '*check-ml-pool-alert.js*')
     )
@@ -53,15 +54,15 @@ foreach ($p in $targets) {
   if ($p.ProcessId -ne $PID) {
     try {
       Stop-Process -Id $p.ProcessId -Force -ErrorAction Stop
-      Write-Output "[AUTO-12H] Processo encerrado: PID=$($p.ProcessId) Nome=$($p.Name)"
+      Write-Output "[AUTO-17H] Processo encerrado: PID=$($p.ProcessId) Nome=$($p.Name)"
     }
     catch {
-      Write-Output "[AUTO-12H] Falha ao encerrar PID=$($p.ProcessId): $($_.Exception.Message)"
+      Write-Output "[AUTO-17H] Falha ao encerrar PID=$($p.ProcessId): $($_.Exception.Message)"
     }
   }
 }
 
-Write-Output "[AUTO-12H] Gerando relatorio final e enviando por e-mail..."
+Write-Output "[AUTO-17H] Gerando relatorio final e enviando por e-mail..."
 
 $env:NODE_OPTIONS = '--no-deprecation'
 if (-not [string]::IsNullOrWhiteSpace($EmailTo)) {
@@ -72,8 +73,8 @@ if (-not [string]::IsNullOrWhiteSpace($EmailTo)) {
 $exitCode = $LASTEXITCODE
 
 if ($exitCode -eq 0) {
-  Write-Output "[AUTO-12H] Relatorio final concluido com sucesso."
+  Write-Output "[AUTO-17H] Relatorio final concluido com sucesso."
 }
 else {
-  Write-Output "[AUTO-12H] Relatorio final retornou erro (exit=$exitCode)."
+  Write-Output "[AUTO-17H] Relatorio final retornou erro (exit=$exitCode)."
 }

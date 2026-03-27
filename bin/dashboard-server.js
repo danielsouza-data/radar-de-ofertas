@@ -11,24 +11,27 @@ const path = require('path');
 const fs = require('fs');
 const { spawn } = require('child_process');
 const { carregarLinksMercadoLivreArquivo, deduplicarLinks, ehLinkMercadoLivreCurto, calcularCiclosPorJanela } = require('../src/utils-link');
+const { PATHS, ensureDirectories } = require('../src/config/paths');
 require('dotenv').config();
+
+ensureDirectories();
 
 const app = express();
 const server = http.createServer(app);
 const PORT = process.env.DASHBOARD_PORT || 3000;
 
 // Diretórios de dados
-const DISPAROS_LOG = path.join(__dirname, '..', 'data', 'disparos-log.json');
-const HISTORICO_OFERTAS = path.join(__dirname, '..', 'src', 'historico-ofertas.json');
-const WHATSAPP_STATUS = path.join(__dirname, '..', 'data', 'whatsapp-status.json');
-const FALHAS_LOG = path.join(__dirname, '..', 'data', 'disparos-falhas.json');
-const SCHEDULER_STATUS_FILE = path.join(__dirname, '..', 'data', 'scheduler-status.json');
-const GLOBAL_LOCK_FILE = path.join(__dirname, '..', 'data', 'disparo-global.lock');
-const REPROCESS_QUEUE_FILE = path.join(__dirname, '..', 'data', 'fila-reprocessamento.json');
-const SCHEDULER_SCRIPT = path.join(__dirname, '..', 'agendador-envios.js');
+const DISPAROS_LOG = PATHS.DISPAROS_LOG;
+const HISTORICO_OFERTAS = PATHS.HISTORICO_OFERTAS;
+const WHATSAPP_STATUS = PATHS.WHATSAPP_STATUS;
+const FALHAS_LOG = PATHS.DISPAROS_FALHAS;
+const SCHEDULER_STATUS_FILE = PATHS.SCHEDULER_STATUS;
+const GLOBAL_LOCK_FILE = PATHS.GLOBAL_LOCK;
+const REPROCESS_QUEUE_FILE = PATHS.FILA_REPROCESSAMENTO;
+const SCHEDULER_SCRIPT = PATHS.AGENDADOR_SCRIPT;
 const ML_LINKBUILDER_LINKS_FILE = process.env.MERCADO_LIVRE_LINKBUILDER_LINKS_FILE
   ? path.resolve(process.env.MERCADO_LIVRE_LINKBUILDER_LINKS_FILE)
-  : path.resolve(__dirname, '..', 'mercadolivre-linkbuilder-links.txt');
+  : PATHS.ML_POOL_LINKS;
 const ML_LINKBUILDER_POOL_WARN_MIN = Math.max(1, Number(process.env.MERCADO_LIVRE_LINKBUILDER_POOL_WARN_MIN || 10));
 const ML_LINKBUILDER_REQUIRE_SHORT = String(process.env.MERCADO_LIVRE_LINKBUILDER_REQUIRE_SHORT || 'true').toLowerCase() !== 'false';
 const ML_JANELA_INICIO_HORA = Math.max(0, Math.min(23, Number(process.env.ML_JANELA_INICIO_HORA || 8)));
