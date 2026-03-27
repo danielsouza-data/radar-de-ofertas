@@ -419,6 +419,13 @@ function obterMonitorRuntime() {
 }
 
 function obterStatusPoolMercadoLivre() {
+  const disparos = lerDisparosLog();
+  const envios = Array.isArray(disparos?.disparos) ? disparos.disparos : [];
+  const enviosMlTotal = envios.filter((d) => {
+    const marketplace = String(d?.marketplace || '').toLowerCase();
+    return marketplace.includes('mercado livre') || marketplace === 'ml';
+  }).length;
+
   const linksEnv = String(process.env.MERCADO_LIVRE_LINKBUILDER_LINKS || '')
     .split(/[\n,;]/)
     .map((s) => s.trim())
@@ -426,19 +433,26 @@ function obterStatusPoolMercadoLivre() {
   const linksArquivo = carregarLinksMercadoLivreArquivo(ML_LINKBUILDER_LINKS_FILE);
   const linksBrutos = deduplicarLinks([...linksEnv, ...linksArquivo]);
   const links = ML_LINKBUILDER_REQUIRE_SHORT ? linksBrutos.filter(ehLinkMercadoLivreCurto) : linksBrutos;
+  const totalLinksPool = links.length;
+  const consumidosNoCiclo = totalLinksPool > 0 ? (enviosMlTotal % totalLinksPool) : 0;
+  const linksDisponiveis = totalLinksPool > 0 ? (totalLinksPool - consumidosNoCiclo) : 0;
   const ciclosDia = calcularCiclosPorJanela(ML_JANELA_INICIO_HORA, ML_JANELA_FIM_HORA, ML_INTERVALO_MINUTOS);
   const linksNecessariosDiaAlternando = Math.ceil(ciclosDia / 2);
 
   return {
-    totalLinks: links.length,
+    // Mantido como principal para o card: representa disponibilidade atual no ciclo.
+    totalLinks: linksDisponiveis,
+    totalLinksPool,
+    enviosMlTotal,
+    consumidosNoCiclo,
     minRecomendado: ML_LINKBUILDER_POOL_WARN_MIN,
-    atendeMinimo: links.length >= ML_LINKBUILDER_POOL_WARN_MIN,
+    atendeMinimo: linksDisponiveis >= ML_LINKBUILDER_POOL_WARN_MIN,
     janelaInicioHora: ML_JANELA_INICIO_HORA,
     janelaFimHora: ML_JANELA_FIM_HORA,
     intervaloMinutos: ML_INTERVALO_MINUTOS,
     ciclosDia,
     linksNecessariosDiaAlternando,
-    cobreDiaAlternando: links.length >= linksNecessariosDiaAlternando,
+    cobreDiaAlternando: linksDisponiveis >= linksNecessariosDiaAlternando,
     fonte: linksEnv.length > 0 ? 'env+arquivo' : 'arquivo',
     modoCurtoObrigatorio: ML_LINKBUILDER_REQUIRE_SHORT,
     linksDescartadosNaoCurtos: Math.max(0, linksBrutos.length - links.length)

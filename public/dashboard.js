@@ -133,7 +133,9 @@ function renderPoolStatus(pool) {
   badgeEl.textContent = 'OK';
   badgeEl.className = 'pool-badge pool-ok';
   cardEl.className = 'pool-status pool-ok';
-  msgEl.textContent = `Cobertura adequada para o dia. Fonte: ${pool.fonte || 'arquivo'}.`;
+  const totalPool = Number(pool.totalLinksPool || pool.totalLinks || 0);
+  const disponiveis = Number(pool.totalLinks || 0);
+  msgEl.textContent = `Cobertura adequada para o dia. Disponiveis agora: ${disponiveis}/${totalPool}. Fonte: ${pool.fonte || 'arquivo'}.`;
 }
 
 function renderWhatsappStatus(wa) {
