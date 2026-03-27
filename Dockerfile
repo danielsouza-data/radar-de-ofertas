@@ -7,7 +7,7 @@ WORKDIR /app
 COPY package*.json ./
 
 # Instalar dependências
-RUN npm ci --only=production && \
+RUN npm ci --omit=dev && \
     npm cache clean --force
 
 # Runtime stage - imagem final
@@ -23,17 +23,19 @@ LABEL version="1.0"
 # Copiar node_modules do builder
 COPY --from=builder /app/node_modules ./node_modules
 
-# Copiar aplicação
-COPY src/ ./src/
-COPY bin/ ./bin/
-COPY scripts/ ./scripts/
-COPY config/ ./config/
+# Copiar aplicação e artefatos necessários
 COPY package*.json ./
-COPY .env.example .env.example
-
-# Copiar dados iniciais (se existirem)
-COPY data/ ./data/ || true
-COPY public/ ./public/ || true
+COPY .env.example ./
+COPY bin/ ./bin/
+COPY public/ ./public/
+COPY src/ ./src/
+COPY scripts/ ./scripts/
+COPY data/ ./data/
+COPY autenticar-sessao.js ./
+COPY agendador-envios.js ./
+COPY disparo-completo.js ./
+COPY mercadolivre-linkbuilder-links.txt ./
+COPY mercadolivre-linkbuilder-map.txt ./
 
 # Criar diretório de logs e dados
 RUN mkdir -p /app/data /app/logs && \
