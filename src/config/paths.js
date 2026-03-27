@@ -51,8 +51,16 @@ const AUTH_FILES = {
   WWEBJS_CACHE: path.join(DIRS.ROOT, '.wwebjs_cache')
 };
 
+// Binário Node desta instância
+// process.execPath = Node que está rodando agora (herdado pelos spawns filhos)
+// NODE_EXECUTABLE = referência explícita ao portátil para uso em scripts externos
+const NODE_EXECUTABLE = process.env.RADAR_NODE_BIN
+  || process.execPath
+  || path.join(DIRS.ROOT, 'node-portable', 'node.exe');
+
 // Arquivos de script/aplicação
 const APP_FILES = {
+  NODE_EXECUTABLE,
   AGENDADOR_SCRIPT: path.join(DIRS.ROOT, 'agendador-envios.js'),
   DISPARO_COMPLETO: path.join(DIRS.ROOT, 'disparo-completo.js'),
   DASHBOARD_HTML: path.join(DIRS.PUBLIC, 'dashboard.html'),

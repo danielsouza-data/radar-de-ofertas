@@ -229,8 +229,8 @@ async function aguardarAckMensagem(messageId, timeoutMs) {
 }
 
 // Arquivo de log de disparos
-const LOG_DISPAROS = path.join(__dirname, 'data', 'disparos-log.json');
-const WHATSAPP_STATUS_FILE = path.join(__dirname, 'data', 'whatsapp-status.json');
+const LOG_DISPAROS = PATHS.DISPAROS_LOG;
+const WHATSAPP_STATUS_FILE = PATHS.WHATSAPP_STATUS;
 
 function atualizarStatusWhatsapp(status, extra = {}) {
   try {
