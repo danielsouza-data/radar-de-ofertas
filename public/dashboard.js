@@ -193,6 +193,7 @@ function setStatus(texto, ok) {
 function renderStats(stats, dadosOfertas) {
   document.getElementById('stat-total').textContent    = stats.total_enviado ?? '—';
   document.getElementById('stat-desconto').textContent = stats.desconto_medio ? stats.desconto_medio + '%' : '—';
+  document.getElementById('stat-comissao').textContent = stats.comissao_media ? stats.comissao_media + '%' : '—';
   document.getElementById('stat-preco').textContent    = stats.preco_medio ? 'R$ ' + Number(stats.preco_medio).toLocaleString('pt-BR', {minimumFractionDigits:2}) : '—';
   document.getElementById('stat-24h').textContent      = stats.ultimas_24h ?? '—';
 
@@ -211,14 +212,18 @@ function renderTabela(ofertas) {
   const tbody = document.getElementById('disparos-body');
 
   if (!ofertas || ofertas.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="9" class="tabela-vazia">Nenhum disparo registrado ainda.</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="10" class="tabela-vazia">Nenhum disparo registrado ainda.</td></tr>';
     return;
   }
 
   tbody.innerHTML = ofertas.map((o, idx) => {
     const preco    = o.preco != null ? 'R$ ' + Number(o.preco).toLocaleString('pt-BR', {minimumFractionDigits:2}) : '—';
     const desconto = o.desconto != null ? o.desconto + '%' : '—';
-    const badgeClass = o.desconto >= 50 ? 'badge-hot' : o.desconto >= 30 ? 'badge-warm' : 'badge-ok';
+    const badgeClass = o.desconto >= 50 ? 'badge-best' : o.desconto >= 30 ? 'badge-good' : 'badge-low';
+    const comissaoRaw = o.comissaoPercentual;
+    const comissao = (comissaoRaw === null || comissaoRaw === undefined || comissaoRaw === '')
+      ? '—'
+      : (Number.isFinite(Number(comissaoRaw)) ? `${Number(comissaoRaw).toFixed(2)}%` : '—');
     const reenvio  = o.reenvio ? ' <span class="tag-reenvio">↺</span>' : '';
     const produto  = escapeHtml(o.produto || '—');
     const marketplace = escapeHtml(o.marketplace || '—');
@@ -241,6 +246,7 @@ function renderTabela(ofertas) {
       <td class="col-marketplace"><span class="marketplace-badge">${marketplace}</span></td>
       <td class="col-preco">${preco}</td>
       <td class="col-desconto"><span class="desconto-badge ${badgeClass}">${desconto}</span></td>
+      <td class="col-comissao">${comissao}</td>
       <td class="col-entrega"><span class="ack-badge ${ackBadgeClass}" title="${escapeHtml(o.messageId || 'sem messageId')}">${ackLabel}</span></td>
       <td class="col-tentativas" title="${tentativasTitle}">${tentativasLabel}</td>
       <td class="col-data">${data}</td>

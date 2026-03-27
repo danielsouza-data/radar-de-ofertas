@@ -7,7 +7,10 @@
 const { Client, LocalAuth, MessageMedia } = require('whatsapp-web.js');
 const path = require('path');
 const fs = require('fs');
-const { executar: processarOfertas } = require('./src/processador-ofertas');
+const {
+  executar: processarOfertas,
+  intercalarOfertasPorMarketplace
+} = require('./src/processador-ofertas');
 const {
   DEFAULT_STALE_MS,
   acquireGlobalLock,
@@ -270,6 +273,9 @@ function registrarDisparo(oferta, numero, total, metaEnvio = {}) {
       marketplace: oferta.marketplace,
       link: oferta.link,
       desconto: oferta.discount,
+      comissaoPercentual: Number.isFinite(Number(oferta.commission_rate))
+        ? Number(oferta.commission_rate)
+        : null,
       tentativasEnvio: Number(metaEnvio.tentativas || 1),
       entregaRecuperada: Boolean(metaEnvio.houveRecuperacao || false),
       erroRecuperado: metaEnvio.ultimoErro || null,
@@ -389,7 +395,7 @@ function filtrarOfertasNaoEnviadas(ofertasLista) {
     console.log('[ANTI-REPETICAO] Nenhuma oferta repetida encontrada no log de disparos');
   }
 
-  return filtradas;
+  return intercalarOfertasPorMarketplace(filtradas);
 }
 
 function getOfertaKey(oferta) {

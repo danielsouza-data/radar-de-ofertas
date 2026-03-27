@@ -54,7 +54,9 @@ const ML_LINKBUILDER_STATE_FILE = process.env.MERCADO_LIVRE_LINKBUILDER_STATE_FI
   : path.resolve(__dirname, '..', 'data', 'mercadolivre-linkbuilder-state.json');
 const ML_LINKBUILDER_POOL_WARN_MIN = Math.max(1, Number(process.env.MERCADO_LIVRE_LINKBUILDER_POOL_WARN_MIN || 10));
 const ML_LINKBUILDER_REQUIRE_SHORT = String(process.env.MERCADO_LIVRE_LINKBUILDER_REQUIRE_SHORT || 'true').toLowerCase() !== 'false';
-const ML_LINKBUILDER_STRICT_MATCH = String(process.env.MERCADO_LIVRE_LINKBUILDER_STRICT_MATCH || 'false').toLowerCase() === 'true';
+const ML_LINKBUILDER_STRICT_MATCH = String(
+  process.env.MERCADO_LIVRE_LINKBUILDER_STRICT_MATCH || (ML_LINKBUILDER_REQUIRE_SHORT ? 'true' : 'false')
+).toLowerCase() === 'true';
 const ML_JANELA_INICIO_HORA = Math.max(0, Math.min(23, Number(process.env.ML_JANELA_INICIO_HORA || 8)));
 const ML_JANELA_FIM_HORA = Math.max(0, Math.min(23, Number(process.env.ML_JANELA_FIM_HORA || 22)));
 const ML_INTERVALO_MINUTOS = Math.max(1, Number(process.env.ML_INTERVALO_MINUTOS || 5));
@@ -667,10 +669,13 @@ function normalizarOfertas(shopee = [], mercadolivre = [], options = {}) {
   const ofertas = [];
   const linksOficiaisMl = Array.isArray(options?.mlLinkBuilderLinks) ? options.mlLinkBuilderLinks : [];
   const requireShortMl = options?.requireMlShortLink !== false;
-  const strictMlMatch = options?.strictMlShortMatch === true;
+  const strictMlMatch = requireShortMl ? options?.strictMlShortMatch !== false : options?.strictMlShortMatch === true;
 
   // Normalizar Shopee
   shopee.forEach(item => {
+    const comissaoRaw = item.commission_rate ?? item.commissionRate;
+    const comissaoPercentual = Number.isFinite(Number(comissaoRaw)) ? Number(comissaoRaw) : null;
+
     ofertas.push({
       marketplace: item.marketplace,
       product_id: item.product_id,
@@ -682,7 +687,8 @@ function normalizarOfertas(shopee = [], mercadolivre = [], options = {}) {
       imageUrl: item.image_url || '',
       // Usar affiliate_link se vem da API, senão gerar manualmente
       link: item.affiliate_link || gerarLinkShopee(item.seller_id, item.product_id, item.product_name),
-      tracking_id: item.tracking_id
+      tracking_id: item.tracking_id,
+      commission_rate: comissaoPercentual
     });
   });
 
@@ -748,6 +754,50 @@ function rankearOfertas(ofertas) {
     .sort((a, b) => b.score - a.score);
 }
 
+function intercalarOfertasPorMarketplace(ofertasLista = []) {
+  if (!Array.isArray(ofertasLista) || ofertasLista.length <= 1) {
+    return Array.isArray(ofertasLista) ? [...ofertasLista] : [];
+  }
+
+  const filas = new Map();
+  const ordemMarketplaces = [];
+
+  ofertasLista.forEach((oferta) => {
+    const marketplace = String(oferta?.marketplace || 'desconhecido');
+    if (!filas.has(marketplace)) {
+      filas.set(marketplace, []);
+      ordemMarketplaces.push(marketplace);
+    }
+    filas.get(marketplace).push(oferta);
+  });
+
+  if (ordemMarketplaces.length <= 1) {
+    return [...ofertasLista];
+  }
+
+  const intercaladas = [];
+  let ultimoMarketplace = '';
+
+  while (intercaladas.length < ofertasLista.length) {
+    let proximoMarketplace = ordemMarketplaces.find((marketplace) => {
+      return marketplace !== ultimoMarketplace && (filas.get(marketplace)?.length || 0) > 0;
+    });
+
+    if (!proximoMarketplace) {
+      proximoMarketplace = ordemMarketplaces.find((marketplace) => (filas.get(marketplace)?.length || 0) > 0);
+    }
+
+    if (!proximoMarketplace) {
+      break;
+    }
+
+    intercaladas.push(filas.get(proximoMarketplace).shift());
+    ultimoMarketplace = proximoMarketplace;
+  }
+
+  return intercaladas;
+}
+
 function selecionarOfertasBalanceadas(ofertasRankeadas, totalDesejado = 6) {
   if (!Array.isArray(ofertasRankeadas) || ofertasRankeadas.length === 0) return [];
 
@@ -794,19 +844,9 @@ function selecionarOfertasBalanceadas(ofertasRankeadas, totalDesejado = 6) {
     }
   }
 
-  const balanceadas = [];
-  while (balanceadas.length < total) {
-    let adicionou = false;
-    for (const mercado of marketplaces) {
-      const fila = escolhidasPorMarketplace.get(mercado);
-      if (fila.length > 0) {
-        balanceadas.push(fila.shift());
-        adicionou = true;
-        if (balanceadas.length >= total) break;
-      }
-    }
-    if (!adicionou) break;
-  }
+  let balanceadas = intercalarOfertasPorMarketplace(
+    marketplaces.flatMap((mercado) => escolhidasPorMarketplace.get(mercado))
+  );
 
   if (balanceadas.length < total) {
     for (const oferta of ofertasRankeadas) {
@@ -818,7 +858,7 @@ function selecionarOfertasBalanceadas(ofertasRankeadas, totalDesejado = 6) {
     }
   }
 
-  return balanceadas;
+  return intercalarOfertasPorMarketplace(balanceadas).slice(0, total);
 }
 
 // ============ MAIN ============
@@ -945,6 +985,7 @@ module.exports = {
   buscarShopeeGraphQL,
   buscarMercadoLivre,
   gerarHashOferta,
+  intercalarOfertasPorMarketplace,
   verificarDuplicacao,
   selecionarLinksPoolRoundRobin,
   obterLinksMercadoLivreOficiais,

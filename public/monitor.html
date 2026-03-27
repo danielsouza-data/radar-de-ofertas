@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Radar de Ofertas - Monitor</title>
+  <link rel="stylesheet" href="dashboard.css">
+</head>
+<body>
+  <div class="container">
+    <nav class="top-tabs" aria-label="Navegacao do Dashboard">
+      <a class="tab-link" href="/dashboard.html">Principal</a>
+      <a class="tab-link tab-active" href="/monitor.html">Monitor</a>
+      <a class="tab-link" href="/apis.html">APIs</a>
+    </nav>
+
+    <header class="header">
+      <div class="header-content">
+        <h1>Monitor Operacional</h1>
+        <div class="header-right">
+          <button id="theme-toggle" class="btn-theme" type="button" aria-label="Alternar tema">🌙 Escuro</button>
+          <span id="hora-sistema" class="hora-sistema"></span>
+          <div class="status-badge">
+            <span class="status-dot" id="monitor-dot"></span>
+            <span id="monitor-status">Carregando...</span>
+          </div>
+        </div>
+      </div>
+    </header>
+
+    <section class="stats monitor-cards">
+      <div class="stat-card">
+        <div class="stat-icon">🕹️</div>
+        <div class="stat-content">
+          <h3>Scheduler</h3>
+          <p id="mon-scheduler">—</p>
+        </div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-icon">🔒</div>
+        <div class="stat-content">
+          <h3>Lock Global</h3>
+          <p id="mon-lock">—</p>
+        </div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-icon">🔁</div>
+        <div class="stat-content">
+          <h3>Fila Reprocesso</h3>
+          <p id="mon-fila">—</p>
+        </div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-icon">❗</div>
+        <div class="stat-content">
+          <h3>Falhas (1h)</h3>
+          <p id="mon-falhas">—</p>
+        </div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-icon">📤</div>
+        <div class="stat-content">
+          <h3>Total Enviados</h3>
+          <p id="mon-enviados">—</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" style="margin-bottom: 16px;">
+      <div class="section-header">
+        <h2>Alertas Operacionais</h2>
+      </div>
+      <div id="monitor-alerts" class="monitor-alerts">
+        <div class="monitor-alert monitor-alert-ok">Sem alertas no momento.</div>
+      </div>
+    </section>
+
+    <section class="section" style="margin-bottom: 16px;">
+      <div class="section-header">
+        <h2>Ações Rápidas</h2>
+      </div>
+      <div class="monitor-actions" id="monitor-actions">
+        <button type="button" class="btn-secondary" data-action="stop-disparo">Encerrar disparo ativo</button>
+        <button type="button" class="btn-secondary" data-action="release-lock">Liberar lock órfão</button>
+        <button type="button" class="btn-secondary" data-action="clear-queue">Limpar fila reprocesso</button>
+        <button type="button" class="btn-secondary" data-action="restart-scheduler">Reiniciar scheduler</button>
+        <button type="button" class="btn-secondary" data-action="restart-stack">Reiniciar stack operacional</button>
+      </div>
+      <p id="monitor-action-result" class="monitor-action-result">Aguardando ação.</p>
+    </section>
+
+    <section class="section">
+      <div class="section-header">
+        <h2>Estado dos Processos</h2>
+        <div class="section-actions">
+          <span id="refresh-status" class="refresh-status"></span>
+          <button id="btn-refresh" class="btn-secondary" type="button">↺ Atualizar</button>
+        </div>
+      </div>
+
+      <div id="process-list" class="monitor-process-list"></div>
+    </section>
+
+    <section class="section" style="margin-top: 16px;">
+      <div class="section-header">
+        <h2>Fila de Reprocessamento</h2>
+      </div>
+      <div class="table-wrapper">
+        <table class="disparos-table">
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>Produto</th>
+              <th>Loja</th>
+              <th>Preço</th>
+              <th>Link</th>
+            </tr>
+          </thead>
+          <tbody id="fila-body">
+            <tr><td colspan="5" class="tabela-vazia">Carregando...</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="section" style="margin-top: 16px;">
+      <div class="section-header">
+        <h2>Resumo Técnico</h2>
+      </div>
+      <pre id="monitor-json" class="api-json">Carregando...</pre>
+    </section>
+
+    <footer class="footer">
+      <p>Monitor atualizado automaticamente a cada 10s</p>
+    </footer>
+  </div>
+
+  <script src="monitor.js"></script>
+</body>
+</html>

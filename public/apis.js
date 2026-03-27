@@ -62,7 +62,8 @@ async function carregarApis() {
     { id: 'api-whatsapp', url: '/api/whatsapp-status' },
     { id: 'api-stats', url: '/api/stats' },
     { id: 'api-ofertas', url: '/api/ofertas/enviadas' },
-    { id: 'api-dashboard', url: '/api/dashboard' }
+    { id: 'api-dashboard', url: '/api/dashboard' },
+    { id: 'api-monitor', url: '/api/monitor' }
   ];
 
   const resultados = await Promise.allSettled(

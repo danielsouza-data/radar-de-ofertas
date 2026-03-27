@@ -3,7 +3,9 @@ const assert = require('node:assert/strict');
 
 const {
   gerarHashOferta,
+  intercalarOfertasPorMarketplace,
   verificarDuplicacao,
+  normalizarOfertas,
   selecionarOfertasBalanceadas,
   selecionarLinksPoolRoundRobin
 } = require('./processador-ofertas');
@@ -169,6 +171,39 @@ test('selecionarOfertasBalanceadas com total ímpar usa distribuição mais pró
   assert.equal(countShopee > 0 && countML > 0, true);
 });
 
+test('selecionarOfertasBalanceadas intercala marketplaces no lote final', () => {
+  const ranked = [
+    mkOferta('Shopee', 1, 99),
+    mkOferta('Shopee', 2, 98),
+    mkOferta('Shopee', 3, 97),
+    mkOferta('Mercado Livre', 1, 96),
+    mkOferta('Mercado Livre', 2, 95),
+    mkOferta('Mercado Livre', 3, 94)
+  ];
+
+  const out = selecionarOfertasBalanceadas(ranked, 6);
+
+  assert.deepEqual(
+    out.map((o) => o.marketplace),
+    ['Shopee', 'Mercado Livre', 'Shopee', 'Mercado Livre', 'Shopee', 'Mercado Livre']
+  );
+});
+
+test('intercalarOfertasPorMarketplace recompõe alternância após remoção no meio do lote', () => {
+  const out = intercalarOfertasPorMarketplace([
+    mkOferta('Shopee', 1, 99),
+    mkOferta('Shopee', 2, 97),
+    mkOferta('Mercado Livre', 1, 96),
+    mkOferta('Shopee', 3, 95),
+    mkOferta('Mercado Livre', 2, 94)
+  ]);
+
+  assert.deepEqual(
+    out.map((o) => o.marketplace),
+    ['Shopee', 'Mercado Livre', 'Shopee', 'Mercado Livre', 'Shopee']
+  );
+});
+
 // ============ selecionarLinksPoolRoundRobin ============
 
 test('selecionarLinksPoolRoundRobin rotaciona o cursor sem repetir no mesmo ciclo', () => {
@@ -199,4 +234,60 @@ test('selecionarLinksPoolRoundRobin limita quantidade ao tamanho do pool dedupli
   assert.deepEqual(run.selected, ['https://meli.la/X', 'https://meli.la/Y']);
   assert.equal(run.total, 2);
   assert.equal(run.nextCursor, 0);
+});
+
+// ============ normalizarOfertas / Mercado Livre ============
+
+test('normalizarOfertas descarta item do Mercado Livre sem link curto quando require short está ativo', () => {
+  const ofertas = normalizarOfertas([], [{
+    marketplace: 'Mercado Livre',
+    product_id: 'MLB123',
+    product_name: 'Acendedor USB',
+    slug: 'acendedor-usb',
+    price: 20.56,
+    original_price: 29.9,
+    rating: 4.5,
+    raw_link: 'https://www.mercadolivre.com.br/acendedor-usb/p/MLB123'
+  }], {
+    requireMlShortLink: true
+  });
+
+  assert.deepEqual(ofertas, []);
+});
+
+test('normalizarOfertas permite fallback completo quando require short está desativado', () => {
+  const ofertas = normalizarOfertas([], [{
+    marketplace: 'Mercado Livre',
+    product_id: 'MLB123',
+    product_name: 'Acendedor USB',
+    slug: 'acendedor-usb',
+    price: 20.56,
+    original_price: 29.9,
+    rating: 4.5,
+    raw_link: 'https://www.mercadolivre.com.br/acendedor-usb/p/MLB123'
+  }], {
+    requireMlShortLink: false
+  });
+
+  assert.equal(ofertas.length, 1);
+  assert.match(ofertas[0].link, /^https:\/\/www\.mercadolivre\.com\.br\/acendedor-usb\/p\/MLB123/);
+});
+
+test('normalizarOfertas preserva commission_rate da Shopee quando disponível', () => {
+  const ofertas = normalizarOfertas([{
+    marketplace: 'Shopee',
+    product_id: 'SP123',
+    product_name: 'Produto Shopee',
+    seller_id: 'S1',
+    price: 100,
+    original_price: 150,
+    rating: 4.7,
+    image_url: 'https://img.example/shopee.jpg',
+    affiliate_link: 'https://s.shopee.com.br/abc',
+    commission_rate: 7.25
+  }], [], {});
+
+  assert.equal(ofertas.length, 1);
+  assert.equal(ofertas[0].commission_rate, 7.25);
+  assert.equal(ofertas[0].link, 'https://s.shopee.com.br/abc');
 });

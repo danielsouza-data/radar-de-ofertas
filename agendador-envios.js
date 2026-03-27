@@ -38,6 +38,7 @@ function nowPtBr() {
 function salvarStatus(extra = {}) {
   const payload = {
     scheduler: 'running',
+    pid: process.pid,
     timezone: TIMEZONE,
     cronRegular: CRON_REGULAR,
     cron2200: CRON_2200,

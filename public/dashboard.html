@@ -11,6 +11,7 @@
 
     <nav class="top-tabs" aria-label="Navegacao do Dashboard">
       <a class="tab-link tab-active" href="/dashboard.html">Principal</a>
+      <a class="tab-link" href="/monitor.html">Monitor</a>
       <a class="tab-link" href="/apis.html">APIs</a>
     </nav>
 
@@ -53,6 +54,13 @@
         <div class="stat-content">
           <h3>Desconto Médio</h3>
           <p id="stat-desconto">—</p>
+        </div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-icon">💸</div>
+        <div class="stat-content">
+          <h3>Comissão Média</h3>
+          <p id="stat-comissao">—</p>
         </div>
       </div>
       <div class="stat-card">
@@ -116,6 +124,7 @@
               <th>Loja</th>
               <th>Preço</th>
               <th>Desconto</th>
+              <th>Comissão</th>
               <th>Entrega</th>
               <th>Tentativas</th>
               <th>Data / Hora</th>
@@ -123,7 +132,7 @@
             </tr>
           </thead>
           <tbody id="disparos-body">
-            <tr><td colspan="9" class="tabela-vazia">Carregando...</td></tr>
+            <tr><td colspan="10" class="tabela-vazia">Carregando...</td></tr>
           </tbody>
         </table>
       </div>
