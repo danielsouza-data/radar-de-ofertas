@@ -11,6 +11,7 @@ const path = require('path');
 const fs = require('fs');
 const { carregarLinksMercadoLivreArquivo, deduplicarLinks, ehLinkMercadoLivreCurto, calcularCiclosPorJanela } = require('../src/utils-link');
 const { PATHS, ensureDirectories } = require('../src/config/paths');
+const { findTrackedLink, recordTrackingClick, computeTrackingStats } = require('../src/services/tracking-service');
 require('dotenv').config();
 
 ensureDirectories();
@@ -28,6 +29,8 @@ const FALHAS_LOG = PATHS.DISPAROS_FALHAS;
 const SCHEDULER_STATUS_FILE = PATHS.SCHEDULER_STATUS;
 const GLOBAL_LOCK_FILE = PATHS.GLOBAL_LOCK;
 const REPROCESS_QUEUE_FILE = PATHS.FILA_REPROCESSAMENTO;
+const CLICK_EVENTS_FILE = PATHS.CLICK_EVENTS;
+const TRACKING_LINKS_FILE = PATHS.TRACKING_LINKS;
 const ML_LINKBUILDER_LINKS_FILE = process.env.MERCADO_LIVRE_LINKBUILDER_LINKS_FILE
   ? path.resolve(process.env.MERCADO_LIVRE_LINKBUILDER_LINKS_FILE)
   : PATHS.ML_POOL_LINKS;
@@ -83,6 +86,14 @@ function lerFalhasLog() {
     console.error('[ERR] Erro ao ler disparos-falhas.json:', e.message);
   }
   return { falhas: [], totalFalhas: 0 };
+}
+
+function lerClickEvents() {
+  return lerJsonOpcional(CLICK_EVENTS_FILE, []);
+}
+
+function lerTrackingLinks() {
+  return lerJsonOpcional(TRACKING_LINKS_FILE, []);
 }
 
 function lerWhatsappStatus() {
@@ -419,6 +430,7 @@ app.get('/api/ofertas/enviadas', (req, res) => {
 app.get('/api/stats', (req, res) => {
   const disparos = lerDisparosLog();
   const ultimasOfertas = disparos.disparos || [];
+  const tracking = computeTrackingStats(ultimasOfertas, lerClickEvents(), lerTrackingLinks());
 
   // Calcular estatísticas
   const precos = ultimasOfertas.map(o => o.preco).filter(p => p);
@@ -437,7 +449,8 @@ app.get('/api/stats', (req, res) => {
     ultimas_24h: ultimasOfertas.filter(o => {
       const idade = (Date.now() - o.timestamp) / (1000 * 60 * 60);
       return idade <= 24;
-    }).length
+    }).length,
+    tracking
   };
 
   res.json(stats);
@@ -447,8 +460,30 @@ app.get('/api/link-pool-status', (req, res) => {
   res.json(obterStatusPoolMercadoLivre());
 });
 
+app.get('/api/tracking-stats', (req, res) => {
+  const disparos = lerDisparosLog();
+  res.json(computeTrackingStats(disparos.disparos || [], lerClickEvents(), lerTrackingLinks()));
+});
+
 app.get('/api/monitor', (req, res) => {
   res.json(obterMonitorRuntime());
+});
+
+app.get('/r/:token', (req, res) => {
+  const tracked = findTrackedLink(String(req.params.token || '').trim());
+  if (!tracked || !tracked.targetUrl) {
+    return res.status(404).send('Link de rastreamento inválido.');
+  }
+
+  recordTrackingClick(tracked.token, {
+    campaignId: tracked.campaignId || null,
+    category: tracked.category || null,
+    marketplace: tracked.marketplace || null,
+    userAgent: String(req.headers['user-agent'] || '').slice(0, 240),
+    referer: String(req.headers.referer || '').slice(0, 240)
+  });
+
+  res.redirect(tracked.targetUrl);
 });
 
 app.get('/api/healthcheck', (req, res) => {

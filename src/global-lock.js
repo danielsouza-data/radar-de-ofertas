@@ -90,7 +90,7 @@ function acquireGlobalLock(lockFilePath, owner, staleMs = DEFAULT_STALE_MS) {
       // Lock stale/invalido: tenta remover e repetir uma unica vez.
       try {
         if (fs.existsSync(lockFilePath)) {
-          fs.unlinkSync(lockFilePath);
+          fs.rmSync(lockFilePath, { force: true });
         }
       } catch {
         // Se nao conseguiu remover, retorna lock ativo para evitar corrida destrutiva.

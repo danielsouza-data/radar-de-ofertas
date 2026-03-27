@@ -15,7 +15,7 @@ function getTempLockPath() {
   return path.join(os.tmpdir(), `radar-lock-test-${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2)}.json`);
 }
 
-test('acquireGlobalLock acquires when lock file does not exist', () => {
+test('acquireGlobalLock acquires when lock file does not exist', { concurrency: false }, () => {
   const lockPath = getTempLockPath();
 
   const result = acquireGlobalLock(lockPath, 'test_owner', 60_000);
@@ -27,7 +27,7 @@ test('acquireGlobalLock acquires when lock file does not exist', () => {
   assert.equal(fs.existsSync(lockPath), false);
 });
 
-test('acquireGlobalLock is denied when active lock exists', () => {
+test('acquireGlobalLock is denied when active lock exists', { concurrency: false }, () => {
   const lockPath = getTempLockPath();
 
   const first = acquireGlobalLock(lockPath, 'first_owner', 60_000);
@@ -41,7 +41,7 @@ test('acquireGlobalLock is denied when active lock exists', () => {
   releaseGlobalLock(lockPath);
 });
 
-test('acquireGlobalLock replaces stale lock', () => {
+test('acquireGlobalLock replaces stale lock', { concurrency: false }, () => {
   const lockPath = getTempLockPath();
   const staleLock = {
     pid: process.pid,
@@ -59,7 +59,7 @@ test('acquireGlobalLock replaces stale lock', () => {
   releaseGlobalLock(lockPath);
 });
 
-test('acquireGlobalLock recupera lock com arquivo invalido (stale/corrompido)', () => {
+test('acquireGlobalLock recupera lock com arquivo invalido (stale/corrompido)', { concurrency: false }, () => {
   const lockPath = getTempLockPath();
   fs.writeFileSync(lockPath, '{json-invalido');
 
@@ -72,7 +72,7 @@ test('acquireGlobalLock recupera lock com arquivo invalido (stale/corrompido)', 
   releaseGlobalLock(lockPath);
 });
 
-test('acquireGlobalLock nega segunda aquisicao mesmo com chamadas seguidas imediatas', () => {
+test('acquireGlobalLock nega segunda aquisicao mesmo com chamadas seguidas imediatas', { concurrency: false }, () => {
   const lockPath = getTempLockPath();
 
   const first = acquireGlobalLock(lockPath, 'owner_a', 60_000);
@@ -85,12 +85,12 @@ test('acquireGlobalLock nega segunda aquisicao mesmo com chamadas seguidas imedi
   releaseGlobalLock(lockPath);
 });
 
-test('isLockActive returns false for malformed lock', () => {
+test('isLockActive returns false for malformed lock', { concurrency: false }, () => {
   const malformed = { pid: 'abc', createdAt: 'not-a-number' };
   assert.equal(isLockActive(malformed, 60_000), false);
 });
 
-test('releaseGlobalLock refuses lock owned by another pid', () => {
+test('releaseGlobalLock refuses lock owned by another pid', { concurrency: false }, () => {
   const lockPath = getTempLockPath();
   const foreignLock = {
     pid: process.pid + 100_000,

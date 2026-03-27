@@ -21,6 +21,8 @@ const { patchConsole } = require('./src/log-mask');
 const { PATHS, ensureDirectories } = require('./src/config/paths');
 const { createDeliveryService } = require('./src/services/delivery-service');
 const { createCircuitBreaker, CircuitBreakerOpenError } = require('./src/resilience/circuit-breaker');
+const { assertSessionDirectoryAccess } = require('./src/security/session-permissions');
+const { createTrackedOfferLink } = require('./src/services/tracking-service');
 require('dotenv').config();
 patchConsole();
 
@@ -60,6 +62,10 @@ const FILA_REPROCESS_FILE = PATHS.FILA_REPROCESSAMENTO;
 const WORKER_HEALTH_FILE = PATHS.DISPARO_WORKER_HEALTH;
 const LOCK_OWNER = process.env.SCHEDULED_RUN === '1' ? 'scheduled_disparo' : 'manual_disparo';
 const WHATSAPP_READY_HEARTBEAT_MS = Math.max(10000, parseEnvInt(process.env.WHATSAPP_READY_HEARTBEAT_MS, 60000));
+const RADAR_PUBLIC_BASE_URL = String(
+  process.env.RADAR_PUBLIC_BASE_URL || `http://localhost:${process.env.DASHBOARD_PORT || 3000}`
+).trim().replace(/\/$/, '');
+const RUN_ID = `${new Date().toISOString().replace(/[-:.TZ]/g, '').slice(0, 14)}-${process.pid}`;
 
 const isTestContext =
   RADAR_TEST_MODE ||
@@ -85,6 +91,8 @@ const AUTH_STORE_PATH = PATHS.WWEBJS_SESSIONS.replace(/[\\/]$/, '') + '/' + SESS
 
 console.log(`\n[SESSION] ID: ${SESSION_ID} (REUTILIZANDO)`);
 console.log(`[IMPORTANTE] Execute autenticar-sessao.js primeiro!\n`);
+console.log(`[RUN] ${RUN_ID}`);
+console.log(`[TRACKING_BASE] ${RADAR_PUBLIC_BASE_URL}`);
 
 // Formatar mensagem WhatsApp
 function sanitizarTextoMensagem(valor, maxLen = 160) {
@@ -117,7 +125,7 @@ function formatarMensagem(oferta, numero, total) {
   const rating = '⭐'.repeat(Math.min(Math.round(Number(oferta.rating || 0)), 5));
   const nomeProduto = sanitizarTextoMensagem(oferta.product_name, 180);
   const marketplace = sanitizarTextoMensagem(oferta.marketplace, 40);
-  const linkSeguro = sanitizarLinkMensagem(oferta.link);
+  const linkSeguro = sanitizarLinkMensagem(oferta.tracking_link || oferta.link);
   const precoAtual = oferta.price.toLocaleString('pt-BR', {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2
@@ -179,6 +187,12 @@ const tentativasPorOferta = new Map();
 let encerrandoIntencionalmente = false;
 let whatsappHeartbeatTimer = null;
 
+function getOfferKey(oferta) {
+  const marketplace = sanitizarTextoMensagem(oferta?.marketplace || 'n/d', 24);
+  const productId = sanitizarTextoMensagem(oferta?.product_id || oferta?.product_name || 'n/d', 72);
+  return `${marketplace}|${productId}`;
+}
+
 const deliveryService = createDeliveryService({
   client,
   MessageMedia,
@@ -218,6 +232,7 @@ const WHATSAPP_STATUS_FILE = PATHS.WHATSAPP_STATUS;
 function atualizarStatusWhatsapp(status, extra = {}) {
   try {
     const payload = {
+      runId: RUN_ID,
       status,
       updatedAt: Date.now(),
       updatedAtISO: new Date().toISOString(),
@@ -234,6 +249,7 @@ function atualizarStatusWhatsapp(status, extra = {}) {
 function atualizarHealthWorker(status, extra = {}) {
   try {
     const payload = {
+      runId: RUN_ID,
       status,
       updatedAt: Date.now(),
       updatedAtISO: new Date().toISOString(),
@@ -283,6 +299,8 @@ function registrarDisparo(oferta, numero, total, metaEnvio = {}) {
     }
 
     log.disparos.push({
+      runId: RUN_ID,
+      offerKey: getOfferKey(oferta),
       timestamp: Date.now(),
       data: new Date().toLocaleString('pt-BR'),
       numero,
@@ -301,7 +319,11 @@ function registrarDisparo(oferta, numero, total, metaEnvio = {}) {
       entregaRecuperada: Boolean(metaEnvio.houveRecuperacao || false),
       erroRecuperado: metaEnvio.ultimoErro || null,
       ackEnvio: Number(metaEnvio.ackFinal || 0),
-      messageId: metaEnvio.messageId || null
+      messageId: metaEnvio.messageId || null,
+      trackingEnabled: Boolean(metaEnvio.trackingEnabled),
+      trackingToken: metaEnvio.trackingToken || null,
+      campaignId: metaEnvio.campaignId || null,
+      category: metaEnvio.category || null
     });
 
     // Manter apenas últimos 100 disparos
@@ -327,6 +349,8 @@ function registrarFalhaDisparo(oferta, numero, total, metaFalha = {}) {
     }
 
     log.falhas.push({
+      runId: RUN_ID,
+      offerKey: getOfferKey(oferta),
       timestamp: Date.now(),
       data: new Date().toLocaleString('pt-BR'),
       numero,
@@ -681,10 +705,12 @@ async function enviarProxima() {
 
   const oferta = ofertas[index];
   const numero = index + 1;
+  oferta.offerKey = getOfferKey(oferta);
   atualizarHealthWorker('sending', {
     currentOfferNumber: numero,
     currentOfferName: oferta?.product_name || null,
-    currentOfferMarketplace: oferta?.marketplace || null
+    currentOfferMarketplace: oferta?.marketplace || null,
+    offerKey: oferta.offerKey
   });
 
   try {
@@ -720,7 +746,18 @@ async function enviarProxima() {
 
     await sincronizarPrecoMercadoLivre(oferta);
 
+    const tracking = createTrackedOfferLink({
+      offer: oferta,
+      runId: RUN_ID,
+      publicBaseUrl: RADAR_PUBLIC_BASE_URL
+    });
+    oferta.tracking_link = tracking.trackingUrl;
+    oferta.trackingToken = tracking.trackingToken;
+    oferta.campaignId = tracking.metadata.campaignId;
+    oferta.category = tracking.metadata.category;
+
     const msg = formatarMensagem(oferta, numero, ofertas.length);
+    console.log(`[RUN ${RUN_ID}] [SEND ${oferta.offerKey}]`);
     console.log(msg);
     if (RADAR_DRY_RUN) {
       console.log('\n[DRY_RUN] Envio real ignorado (nenhuma mensagem foi enviada ao WhatsApp).');
@@ -739,11 +776,19 @@ async function enviarProxima() {
 
     console.log('\n[STATUS] Transmitindo...');
 
-    const metaEnvio = await deliveryService.sendWithRecovery(CHANNEL_ID, msg, media);
+    const metaEnvio = await deliveryService.sendWithRecovery(CHANNEL_ID, msg, media, {
+      runId: RUN_ID,
+      offerKey: oferta.offerKey
+    });
     console.log(`[OK] ✅ Enviada! (ack=${metaEnvio.ackFinal}, id=${metaEnvio.messageId || 'n/a'})`);
     if (metaEnvio.houveRecuperacao) {
       console.log(`[RECOVERY] Envio recuperado apos ${metaEnvio.tentativas} tentativa(s).`);
     }
+
+    metaEnvio.trackingEnabled = tracking.trackingEnabled;
+    metaEnvio.trackingToken = tracking.trackingToken;
+    metaEnvio.campaignId = tracking.metadata.campaignId;
+    metaEnvio.category = tracking.metadata.category;
 
     // Registrar no log de disparos
     registrarDisparo(oferta, numero, ofertas.length, metaEnvio);
@@ -928,6 +973,7 @@ process.on('exit', () => {
 });
 
 ensureDirectories();
+assertSessionDirectoryAccess(AUTH_STORE_PATH, console);
 console.log('\n[INIT] Inicializando WhatsApp...\n');
 atualizarHealthWorker('initializing');
 const lockResult = acquireGlobalLock(LOCK_FILE, LOCK_OWNER, LOCK_STALE_MS);

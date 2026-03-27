@@ -105,6 +105,27 @@ node disparo-completo.js
   - Nivel de corte padrao: `moderate`
   - Para ajustar: `SECURITY_AUDIT_MAX_LEVEL=high npm run security:audit`
 
+## Tracking de cliques (CTR)
+
+- O disparo gera links rastreaveis via rota `GET /r/:token`
+- Se `RADAR_PUBLIC_BASE_URL` nao estiver definido, o fallback local e `http://localhost:3000`
+- Para medir CTR real em usuarios externos, configure `RADAR_PUBLIC_BASE_URL` com dominio publico
+- Endpoints:
+  - `GET /api/tracking-stats` resumo de envios rastreados e cliques
+  - `GET /r/:token` redirect + registro de clique
+- Dashboard exibe:
+  - `Cliques Unicos`
+  - `CTR Tracking`
+  - Top campanhas por categoria/marketplace
+
+## Variaveis novas recomendadas
+
+- `RADAR_PUBLIC_BASE_URL`: base para links rastreaveis (ex.: `https://seu-dominio.com`)
+- `SCHEDULER_STATUS_HEARTBEAT_MS`: heartbeat do scheduler (padrao `60000`)
+- `WHATSAPP_READY_HEARTBEAT_MS`: heartbeat da sessao WhatsApp pronta (padrao `60000`)
+- `WHATSAPP_SESSION_PERMISSIONS_STRICT`: `true` para bloquear startup com ACL/permissao insegura
+- `DEBUG_SHOPEE_AUTH`: `true` apenas para diagnostico local
+
 ## Mercado Livre
 
 - Pool oficial do Link Builder expandida e persistida em `mercadolivre-linkbuilder-links.txt`

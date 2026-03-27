@@ -15,9 +15,9 @@ const fs = require('fs');
 const {
   DEFAULT_STALE_MS,
   readLock,
-  isLockActive
 } = require('./src/global-lock');
 const { PATHS, ensureDirectories } = require('./src/config/paths');
+const { getDispatchSkipReason } = require('./src/scheduler-core');
 
 const TIMEZONE = process.env.SCHED_TZ || 'America/Sao_Paulo';
 const DISPARO_SCRIPT = PATHS.DISPARO_COMPLETO;
@@ -65,14 +65,20 @@ function log(msg) {
 }
 
 function executarDisparo(trigger) {
-  if (isRunning) {
+  const existingLock = readLock(LOCK_FILE);
+  const skipReason = getDispatchSkipReason({
+    isRunning,
+    existingLock,
+    lockStaleMs: LOCK_STALE_MS
+  });
+
+  if (skipReason === 'run_in_progress') {
     log(`Ignorado (${trigger}): disparo anterior ainda em execucao.`);
     salvarStatus({ lastSkipReason: 'run_in_progress', lastTrigger: trigger });
     return;
   }
 
-  const existingLock = readLock(LOCK_FILE);
-  if (isLockActive(existingLock, LOCK_STALE_MS)) {
+  if (skipReason === 'global_lock_active') {
     log(`Ignorado (${trigger}): lock global ativo por ${existingLock.owner || 'desconhecido'} (pid ${existingLock.pid || 'n/a'}).`);
     salvarStatus({
       lastSkipReason: 'global_lock_active',

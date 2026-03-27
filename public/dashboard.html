@@ -78,6 +78,27 @@
           <p id="stat-24h">—</p>
         </div>
       </div>
+      <div class="stat-card">
+        <div class="stat-icon">🖱️</div>
+        <div class="stat-content">
+          <h3>Cliques Únicos</h3>
+          <p id="stat-clicks">—</p>
+        </div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-icon">📈</div>
+        <div class="stat-content">
+          <h3>CTR Tracking</h3>
+          <p id="stat-ctr">—</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" style="margin-bottom: 20px;">
+      <div class="section-header">
+        <h2>📊 Tracking</h2>
+      </div>
+      <div id="tracking-summary" class="monitor-process-list"></div>
     </section>
 
     <section class="pool-status" id="pool-status-card" aria-live="polite">
@@ -136,6 +157,21 @@
             <tr><td colspan="10" class="tabela-vazia">Carregando...</td></tr>
           </tbody>
         </table>
+      </div>
+
+      <div class="paginacao-disparos" aria-label="Paginação da lista de disparos">
+        <span id="disparos-total" class="paginacao-total">0 disparo(s)</span>
+        <div class="paginacao-controles">
+          <label for="disparos-por-pagina" class="paginacao-label">Itens por página</label>
+          <select id="disparos-por-pagina" class="paginacao-select" aria-label="Selecionar quantidade de disparos por página">
+            <option value="10">10</option>
+            <option value="20" selected>20</option>
+            <option value="50">50</option>
+          </select>
+          <button id="disparos-prev" class="btn-secondary" type="button">← Anterior</button>
+          <span id="disparos-pagina" class="paginacao-pagina">Página 1 de 1</span>
+          <button id="disparos-next" class="btn-secondary" type="button">Próxima →</button>
+        </div>
       </div>
     </section>
 

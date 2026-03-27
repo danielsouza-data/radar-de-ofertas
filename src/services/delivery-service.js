@@ -65,9 +65,12 @@ function createDeliveryService({
     return ultimoAck;
   }
 
-  async function sendWithRecovery(chatId, msg, media = null) {
+  async function sendWithRecovery(chatId, msg, media = null, context = {}) {
     let houveRecuperacao = false;
     let ultimoErro = null;
+    const contextLabel = context.runId || context.offerKey
+      ? ` [run=${context.runId || 'n/a'} offer=${context.offerKey || 'n/a'}]`
+      : '';
 
     for (let tentativa = 1; tentativa <= maxAttempts; tentativa++) {
       try {
@@ -96,7 +99,7 @@ function createDeliveryService({
           throw error;
         }
 
-        logger.warn(`[RECOVERY] Erro recuperavel no envio (${error.message}). Tentando recuperar sessao...`);
+        logger.warn(`[RECOVERY]${contextLabel} Erro recuperavel no envio (${error.message}). Tentando recuperar sessao...`);
         houveRecuperacao = true;
 
         try {
@@ -104,11 +107,11 @@ function createDeliveryService({
             await client.pupPage.reload({ waitUntil: 'networkidle0', timeout: 60000 });
           }
         } catch (reloadError) {
-          logger.warn(`[RECOVERY] Falha ao recarregar pagina do WhatsApp: ${reloadError.message}`);
+          logger.warn(`[RECOVERY]${contextLabel} Falha ao recarregar pagina do WhatsApp: ${reloadError.message}`);
         }
 
         const backoffMs = tentativa * recoveryBackoffBaseMs;
-        logger.warn(`[RECOVERY] Aguardando ${backoffMs / 1000}s antes da nova tentativa...`);
+        logger.warn(`[RECOVERY]${contextLabel} Aguardando ${backoffMs / 1000}s antes da nova tentativa...`);
         await sleep(backoffMs);
       }
     }

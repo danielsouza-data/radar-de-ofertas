@@ -40,6 +40,8 @@ const DATA_FILES = {
   SCHEDULER_STATUS: path.join(DIRS.DATA, 'scheduler-status.json'),
   GLOBAL_LOCK: path.join(DIRS.DATA, 'disparo-global.lock'),
   FILA_REPROCESSAMENTO: path.join(DIRS.DATA, 'fila-reprocessamento.json'),
+  TRACKING_LINKS: path.join(DIRS.DATA, 'tracking-links.json'),
+  CLICK_EVENTS: path.join(DIRS.DATA, 'click-events.json'),
   ML_POOL_LINKS: process.env.MERCADO_LIVRE_LINKBUILDER_LINKS_FILE
     ? path.resolve(process.env.MERCADO_LIVRE_LINKBUILDER_LINKS_FILE)
     : path.join(DIRS.ROOT, 'mercadolivre-linkbuilder-links.txt'),

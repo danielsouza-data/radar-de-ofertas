@@ -9,6 +9,7 @@ const { Client, LocalAuth } = require('whatsapp-web.js');
 const fs = require('fs');
 const { patchConsole } = require('./src/log-mask');
 const { PATHS, ensureDirectories } = require('./src/config/paths');
+const { assertSessionDirectoryAccess } = require('./src/security/session-permissions');
 require('dotenv').config();
 patchConsole();
 
@@ -41,6 +42,7 @@ function atualizarStatusWhatsapp(status, extra = {}) {
 }
 
 ensureDirectories();
+assertSessionDirectoryAccess(AUTH_STORE_PATH, console);
 
 // Cliente WhatsApp
 const client = new Client({

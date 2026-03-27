@@ -2,6 +2,34 @@ let contadorProxima = 15;
 let intervalRefresh = null;
 let intervalRelogio = null;
 const THEME_KEY = 'radar-dashboard-theme';
+const DISPAROS_PAGE_SIZE_KEY = 'radar-dashboard-disparos-page-size';
+const DISPAROS_PAGE_SIZE_OPTIONS = [10, 20, 50];
+const DEFAULT_DISPAROS_PAGE_SIZE = 20;
+let paginaDisparosAtual = 1;
+let disparosCache = [];
+let disparosPorPagina = DEFAULT_DISPAROS_PAGE_SIZE;
+
+function obterDisparosPorPaginaSalvo() {
+  const valor = Number(localStorage.getItem(DISPAROS_PAGE_SIZE_KEY));
+  return DISPAROS_PAGE_SIZE_OPTIONS.includes(valor) ? valor : DEFAULT_DISPAROS_PAGE_SIZE;
+}
+
+function configurarSeletorDisparosPorPagina() {
+  const selectEl = document.getElementById('disparos-por-pagina');
+  if (!selectEl) return;
+
+  disparosPorPagina = obterDisparosPorPaginaSalvo();
+  selectEl.value = String(disparosPorPagina);
+
+  selectEl.addEventListener('change', (event) => {
+    const novoValor = Number(event.target.value);
+    if (!DISPAROS_PAGE_SIZE_OPTIONS.includes(novoValor)) return;
+    disparosPorPagina = novoValor;
+    localStorage.setItem(DISPAROS_PAGE_SIZE_KEY, String(novoValor));
+    paginaDisparosAtual = 1;
+    renderTabela(disparosCache);
+  });
+}
 
 function aplicarTema(tema) {
   const isLight = tema === 'light';
@@ -55,12 +83,13 @@ async function carregarDados() {
   contadorProxima = 15;
 
   try {
-    const [resOfertas, resStats, resWhatsapp, resHealth, resPool] = await Promise.all([
+    const [resOfertas, resStats, resWhatsapp, resHealth, resPool, resTracking] = await Promise.all([
       fetch('/api/ofertas/enviadas'),
       fetch('/api/stats'),
       fetch('/api/whatsapp-status'),
       fetch('/api/healthcheck'),
-      fetch('/api/link-pool-status')
+      fetch('/api/link-pool-status'),
+      fetch('/api/tracking-stats')
     ]);
 
     if (!resOfertas.ok || !resStats.ok || !resWhatsapp.ok) throw new Error('Falha na API');
@@ -70,12 +99,14 @@ async function carregarDados() {
     const dadosWhatsapp = await resWhatsapp.json();
     const dadosHealth = resHealth.ok ? await resHealth.json() : null;
     const poolPayload = resPool.ok ? await resPool.json() : null;
+    const trackingPayload = resTracking.ok ? await resTracking.json() : null;
 
     renderStats(dadosStats, dadosOfertas);
     renderTabela(dadosOfertas.ofertas || []);
     renderWhatsappStatus(dadosWhatsapp);
     renderAlertas(dadosHealth);
     renderPoolStatus(poolPayload || dadosHealth?.poolMercadoLivre || null);
+    renderTracking(trackingPayload || dadosStats?.tracking || null);
 
     const el = document.getElementById('refresh-status');
     if (el) el.textContent = `Atualizado às ${new Date().toLocaleTimeString('pt-BR')}`;
@@ -138,6 +169,39 @@ function renderPoolStatus(pool) {
   msgEl.textContent = `Cobertura adequada para o dia. Disponiveis agora: ${disponiveis}/${totalPool}. Fonte: ${pool.fonte || 'arquivo'}.`;
 }
 
+function renderTracking(tracking) {
+  const clicksEl = document.getElementById('stat-clicks');
+  const ctrEl = document.getElementById('stat-ctr');
+  const summaryEl = document.getElementById('tracking-summary');
+  if (!clicksEl || !ctrEl || !summaryEl) return;
+
+  if (!tracking || !tracking.trackingEnabled) {
+    clicksEl.textContent = '0';
+    ctrEl.textContent = 'off';
+    summaryEl.innerHTML = '<article class="monitor-process-item"><p>Tracking desativado. Defina RADAR_PUBLIC_BASE_URL para gerar links rastreáveis.</p></article>';
+    return;
+  }
+
+  clicksEl.textContent = String(tracking.uniqueClicks ?? 0);
+  ctrEl.textContent = `${Number(tracking.ctr || 0).toFixed(2)}%`;
+
+  const campanhas = Array.isArray(tracking.topCampaigns) ? tracking.topCampaigns : [];
+  if (campanhas.length === 0) {
+    summaryEl.innerHTML = '<article class="monitor-process-item"><p>Sem campanhas clicadas ainda.</p></article>';
+    return;
+  }
+
+  summaryEl.innerHTML = campanhas.map((item) => `
+    <article class="monitor-process-item">
+      <div class="monitor-process-head">
+        <strong>${escapeHtml(item.category || 'geral')} · ${escapeHtml(item.marketplace || 'geral')}</strong>
+        <span class="monitor-state monitor-state-ok">CTR ${Number(item.ctr || 0).toFixed(2)}%</span>
+      </div>
+      <p>${escapeHtml(item.campaignId || 'sem-campanha')} | envios ${item.sends} | cliques ${item.uniqueClicks}</p>
+    </article>
+  `).join('');
+}
+
 function renderWhatsappStatus(wa) {
   const status = String(wa?.status || 'unknown');
   const detail = String(wa?.detail || 'Sem detalhe');
@@ -198,6 +262,8 @@ function renderStats(stats, dadosOfertas) {
   document.getElementById('stat-comissao').textContent = stats.comissao_media ? stats.comissao_media + '%' : '—';
   document.getElementById('stat-preco').textContent    = stats.preco_medio ? 'R$ ' + Number(stats.preco_medio).toLocaleString('pt-BR', {minimumFractionDigits:2}) : '—';
   document.getElementById('stat-24h').textContent      = stats.ultimas_24h ?? '—';
+  document.getElementById('stat-clicks').textContent   = String(stats.tracking?.uniqueClicks ?? 0);
+  document.getElementById('stat-ctr').textContent      = stats.tracking?.trackingEnabled ? `${Number(stats.tracking.ctr || 0).toFixed(2)}%` : 'off';
 
   // Último envio vem do dashboard endpoint
   const ofertas = dadosOfertas.ofertas || [];
@@ -212,13 +278,48 @@ function renderStats(stats, dadosOfertas) {
 // ─── Renderizar tabela ───────────────────────────────────────────────────────
 function renderTabela(ofertas) {
   const tbody = document.getElementById('disparos-body');
+  const totalEl = document.getElementById('disparos-total');
+  const paginaEl = document.getElementById('disparos-pagina');
+  const btnPrev = document.getElementById('disparos-prev');
+  const btnNext = document.getElementById('disparos-next');
 
-  if (!ofertas || ofertas.length === 0) {
+  disparosCache = Array.isArray(ofertas) ? ofertas : [];
+  const totalItens = disparosCache.length;
+  const totalPaginas = Math.max(1, Math.ceil(totalItens / disparosPorPagina));
+
+  if (paginaDisparosAtual > totalPaginas) {
+    paginaDisparosAtual = totalPaginas;
+  }
+  if (paginaDisparosAtual < 1) {
+    paginaDisparosAtual = 1;
+  }
+
+  if (totalEl) {
+    totalEl.textContent = `${totalItens} disparo(s)`;
+  }
+
+  if (paginaEl) {
+    paginaEl.textContent = `Página ${paginaDisparosAtual} de ${totalPaginas}`;
+  }
+
+  if (btnPrev) {
+    btnPrev.disabled = paginaDisparosAtual <= 1;
+  }
+
+  if (btnNext) {
+    btnNext.disabled = paginaDisparosAtual >= totalPaginas;
+  }
+
+  if (totalItens === 0) {
     tbody.innerHTML = '<tr><td colspan="10" class="tabela-vazia">Nenhum disparo registrado ainda.</td></tr>';
     return;
   }
 
-  tbody.innerHTML = ofertas.map((o, idx) => {
+  const inicio = (paginaDisparosAtual - 1) * disparosPorPagina;
+  const fim = inicio + disparosPorPagina;
+  const ofertasPagina = disparosCache.slice(inicio, fim);
+
+  tbody.innerHTML = ofertasPagina.map((o, idx) => {
     const preco    = o.preco != null ? 'R$ ' + Number(o.preco).toLocaleString('pt-BR', {minimumFractionDigits:2}) : '—';
     const desconto = o.desconto != null ? o.desconto + '%' : '—';
     const badgeClass = o.desconto >= 50 ? 'badge-best' : o.desconto >= 30 ? 'badge-good' : 'badge-low';
@@ -231,7 +332,8 @@ function renderTabela(ofertas) {
     const marketplace = escapeHtml(o.marketplace || '—');
     const data     = o.data || '—';
     const link     = o.link ? `<a href="${escapeHtml(o.link)}" target="_blank" class="link-btn">🔗</a>` : '—';
-    const num      = typeof o.numero === 'number' ? o.numero : o.numero ?? (ofertas.length - idx);
+    const numPadrao = totalItens - (inicio + idx);
+    const num      = typeof o.numero === 'number' ? o.numero : o.numero ?? numPadrao;
     const ack      = Number(o.ackEnvio ?? 0);
     const tentativas = Number(o.tentativasEnvio ?? 1);
     const recuperada = Boolean(o.entregaRecuperada);
@@ -257,6 +359,14 @@ function renderTabela(ofertas) {
   }).join('');
 }
 
+function mudarPaginaDisparos(delta) {
+  const totalPaginas = Math.max(1, Math.ceil(disparosCache.length / disparosPorPagina));
+  const proximaPagina = Math.min(Math.max(1, paginaDisparosAtual + delta), totalPaginas);
+  if (proximaPagina === paginaDisparosAtual) return;
+  paginaDisparosAtual = proximaPagina;
+  renderTabela(disparosCache);
+}
+
 // ─── Utilitário seguro ───────────────────────────────────────────────────────
 function escapeHtml(str) {
   return String(str)
@@ -269,6 +379,13 @@ function escapeHtml(str) {
 // ─── Init ────────────────────────────────────────────────────────────────────
 window.addEventListener('DOMContentLoaded', () => {
   inicializarTema();
+  configurarSeletorDisparosPorPagina();
+
+  const btnPrev = document.getElementById('disparos-prev');
+  const btnNext = document.getElementById('disparos-next');
+  if (btnPrev) btnPrev.addEventListener('click', () => mudarPaginaDisparos(-1));
+  if (btnNext) btnNext.addEventListener('click', () => mudarPaginaDisparos(1));
+
   atualizarRelogio();
   intervalRelogio  = setInterval(atualizarRelogio, 1000);
   intervalRefresh  = setInterval(tickContador, 1000);

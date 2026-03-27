@@ -6,6 +6,7 @@
 
 const { Client, LocalAuth } = require('whatsapp-web.js');
 const path = require('path');
+const { assertSessionDirectoryAccess } = require('../src/security/session-permissions');
 require('dotenv').config();
 
 function parseEnvBool(val, defaultVal = false) {
@@ -47,6 +48,7 @@ if (isTestContext && PROD_CHANNEL_ID && CHANNEL_ID === PROD_CHANNEL_ID) {
 }
 
 console.log('[ENCERRAMENTO] Conectando ao WhatsApp...\n');
+assertSessionDirectoryAccess(AUTH_STORE_PATH, console);
 
 const client = new Client({
   authStrategy: new LocalAuth({

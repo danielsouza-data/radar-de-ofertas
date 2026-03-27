@@ -13,6 +13,7 @@ const crypto = require('crypto');
 
 const APP_ID = process.env.SHOPEE_PARTNER_ID;
 const APP_SECRET = process.env.SHOPEE_PARTNER_KEY;
+const DEBUG_SHOPEE_AUTH = String(process.env.DEBUG_SHOPEE_AUTH || 'false').toLowerCase() === 'true';
 
 class ShopeeAffiliateAPI {
   constructor() {
@@ -44,10 +45,10 @@ class ShopeeAffiliateAPI {
     try {
       const { timestamp, signature } = this.gerarSignatura(query);
 
-      console.log(`\n[SHOPEE API] Enviando query...`);
-      console.log(`  App ID: ${APP_ID}`);
-      console.log(`  Timestamp: ${timestamp}`);
-      console.log(`  Signature: ${signature.substring(0, 20)}...`);
+      if (DEBUG_SHOPEE_AUTH) {
+        console.log(`\n[SHOPEE API] Enviando query autenticada...`);
+        console.log(`  Timestamp: ${timestamp}`);
+      }
 
       const response = await axios.post(
         this.baseURL,
