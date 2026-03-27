@@ -333,6 +333,67 @@ body {
   gap: 8px;
 }
 
+.monitor-control-plane-config {
+  display: grid;
+  gap: 10px;
+  margin-bottom: 14px;
+  padding: 12px;
+  border-radius: 10px;
+  background: #121521;
+  border: 1px solid #2a2d3a;
+}
+
+.monitor-control-plane-fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 10px;
+}
+
+.monitor-field {
+  display: grid;
+  gap: 6px;
+  font-size: 12px;
+  color: #9ea8c8;
+}
+
+.monitor-field span {
+  font-weight: 600;
+}
+
+.monitor-field input {
+  width: 100%;
+  padding: 9px 10px;
+  border-radius: 8px;
+  border: 1px solid #31374f;
+  background: #0f1117;
+  color: #e0e0e0;
+  font-size: 13px;
+}
+
+.monitor-field input:focus {
+  outline: none;
+  border-color: #667eea;
+}
+
+.monitor-control-plane-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.monitor-control-plane-status {
+  font-size: 12px;
+  color: #aab3d6;
+}
+
+.monitor-control-plane-status.ok {
+  color: #8be9a4;
+}
+
+.monitor-control-plane-status.erro {
+  color: #ff9d9d;
+}
+
 .monitor-action-result {
   margin-top: 10px;
   font-size: 13px;
@@ -598,10 +659,21 @@ body.light-theme .tabela-vazia {
 body.light-theme .status-badge,
 body.light-theme .btn-secondary,
 body.light-theme .btn-theme,
-body.light-theme .marketplace-badge {
+body.light-theme .marketplace-badge,
+body.light-theme .monitor-control-plane-config {
   background: #f4f7ff;
   border-color: #d6dff7;
   color: #42507a;
+}
+
+body.light-theme .monitor-field {
+  color: #4d5d86;
+}
+
+body.light-theme .monitor-field input {
+  background: #ffffff;
+  border-color: #d6dff7;
+  color: #22315a;
 }
 
 body.light-theme .btn-secondary:hover,

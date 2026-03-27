@@ -27,11 +27,13 @@ const LOCK_STALE_MS = Number(process.env.SEND_LOCK_STALE_MS || DEFAULT_STALE_MS)
 const START_HOUR = Math.max(0, Math.min(23, Number(process.env.SCHEDULE_START_HOUR || 9)));
 const END_HOUR = Math.max(0, Math.min(23, Number(process.env.SCHEDULE_END_HOUR || 17)));
 const LAST_DISPATCH_HOUR = Math.max(START_HOUR, END_HOUR - 1);
+const STATUS_HEARTBEAT_MS = Math.max(10000, Number(process.env.SCHEDULER_STATUS_HEARTBEAT_MS || 60000));
 
 const CRON_REGULAR = `*/5 ${START_HOUR}-${LAST_DISPATCH_HOUR} * * *`;
 
 let isRunning = false;
 let currentChild = null;
+let heartbeatTimer = null;
 
 function nowPtBr() {
   return new Date().toLocaleString('pt-BR', { timeZone: TIMEZONE });
@@ -123,10 +125,15 @@ function iniciarAgendamentos() {
     () => executarDisparo('regular_5min'),
     { timezone: TIMEZONE }
   );
+
+  heartbeatTimer = setInterval(() => {
+    salvarStatus({ detail: isRunning ? 'Disparo em execucao' : 'Agendador em espera' });
+  }, STATUS_HEARTBEAT_MS);
 }
 
 process.on('SIGINT', () => {
   log('Recebido SIGINT. Encerrando agendador...');
+  if (heartbeatTimer) clearInterval(heartbeatTimer);
   salvarStatus({ scheduler: 'stopped', isRunning: false, dispatchInProgress: false, detail: 'Encerrado por SIGINT', stoppedAt: Date.now() });
 
   if (currentChild && !currentChild.killed) {
@@ -138,6 +145,7 @@ process.on('SIGINT', () => {
 
 process.on('SIGTERM', () => {
   log('Recebido SIGTERM. Encerrando agendador...');
+  if (heartbeatTimer) clearInterval(heartbeatTimer);
   salvarStatus({ scheduler: 'stopped', isRunning: false, dispatchInProgress: false, detail: 'Encerrado por SIGTERM', stoppedAt: Date.now() });
 
   if (currentChild && !currentChild.killed) {

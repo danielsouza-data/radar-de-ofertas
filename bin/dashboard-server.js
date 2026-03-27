@@ -9,7 +9,6 @@ const express = require('express');
 const http = require('http');
 const path = require('path');
 const fs = require('fs');
-const { spawn } = require('child_process');
 const { carregarLinksMercadoLivreArquivo, deduplicarLinks, ehLinkMercadoLivreCurto, calcularCiclosPorJanela } = require('../src/utils-link');
 const { PATHS, ensureDirectories } = require('../src/config/paths');
 require('dotenv').config();
@@ -24,11 +23,11 @@ const PORT = process.env.DASHBOARD_PORT || 3000;
 const DISPAROS_LOG = PATHS.DISPAROS_LOG;
 const HISTORICO_OFERTAS = PATHS.HISTORICO_OFERTAS;
 const WHATSAPP_STATUS = PATHS.WHATSAPP_STATUS;
+const DISPARO_WORKER_HEALTH_FILE = PATHS.DISPARO_WORKER_HEALTH;
 const FALHAS_LOG = PATHS.DISPAROS_FALHAS;
 const SCHEDULER_STATUS_FILE = PATHS.SCHEDULER_STATUS;
 const GLOBAL_LOCK_FILE = PATHS.GLOBAL_LOCK;
 const REPROCESS_QUEUE_FILE = PATHS.FILA_REPROCESSAMENTO;
-const SCHEDULER_SCRIPT = PATHS.AGENDADOR_SCRIPT;
 const ML_LINKBUILDER_LINKS_FILE = process.env.MERCADO_LIVRE_LINKBUILDER_LINKS_FILE
   ? path.resolve(process.env.MERCADO_LIVRE_LINKBUILDER_LINKS_FILE)
   : PATHS.ML_POOL_LINKS;
@@ -37,6 +36,11 @@ const ML_LINKBUILDER_REQUIRE_SHORT = String(process.env.MERCADO_LIVRE_LINKBUILDE
 const ML_JANELA_INICIO_HORA = Math.max(0, Math.min(23, Number(process.env.ML_JANELA_INICIO_HORA || 8)));
 const ML_JANELA_FIM_HORA = Math.max(0, Math.min(23, Number(process.env.ML_JANELA_FIM_HORA || 22)));
 const ML_INTERVALO_MINUTOS = Math.max(1, Number(process.env.ML_INTERVALO_MINUTOS || 5));
+const WHATSAPP_STALE_THRESHOLD_SECONDS = Math.max(60, Number(process.env.WHATSAPP_STALE_THRESHOLD_SECONDS || 180));
+const WHATSAPP_READY_CACHE_THRESHOLD_SECONDS = Math.max(
+  WHATSAPP_STALE_THRESHOLD_SECONDS,
+  Number(process.env.WHATSAPP_READY_CACHE_THRESHOLD_SECONDS || 21600)
+);
 
 console.log('\n' + '='.repeat(70));
 console.log('  📊 DASHBOARD - RADAR DE OFERTAS');
@@ -124,18 +128,6 @@ function lerJsonOpcional(filePath, fallback) {
   return fallback;
 }
 
-function salvarJson(filePath, payload) {
-  try {
-    const dir = path.dirname(filePath);
-    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(filePath, JSON.stringify(payload, null, 2));
-    return true;
-  } catch (e) {
-    console.error(`[ERR] Erro ao salvar ${path.basename(filePath)}:`, e.message);
-    return false;
-  }
-}
-
 function pidEstaAtivo(pid) {
   const pidNum = Number(pid);
   if (!Number.isFinite(pidNum) || pidNum <= 0) return false;
@@ -147,151 +139,35 @@ function pidEstaAtivo(pid) {
   }
 }
 
-function encerrarPid(pid) {
-  const pidNum = Number(pid);
-  if (!Number.isFinite(pidNum) || pidNum <= 0) return false;
-  if (!pidEstaAtivo(pidNum)) return false;
-
-  try {
-    process.kill(pidNum, 'SIGTERM');
-    return true;
-  } catch {
-    try {
-      process.kill(pidNum);
-      return true;
-    } catch {
-      return false;
-    }
-  }
-}
-
-function iniciarProcessoDetached(scriptPath, extraEnv = {}) {
-  try {
-    const child = spawn(process.execPath, [scriptPath], {
-      cwd: PATHS.ROOT,
-      detached: true,
-      stdio: 'ignore',
-      env: {
-        ...process.env,
-        ...extraEnv
-      }
-    });
-
-    child.unref();
-
-    return {
-      ok: true,
-      pid: child.pid
-    };
-  } catch (e) {
-    return {
-      ok: false,
-      error: e.message
-    };
-  }
-}
-
-function acaoLiberarLock() {
-  const lockRaw = lerJsonOpcional(GLOBAL_LOCK_FILE, null);
-  if (!lockRaw) {
-    return { ok: true, action: 'release-lock', message: 'Lock já estava livre.' };
-  }
-
-  const lockPid = Number(lockRaw?.pid || 0) || null;
-  const ativo = lockPid ? pidEstaAtivo(lockPid) : false;
-  if (ativo) {
-    return {
-      ok: false,
-      action: 'release-lock',
-      message: `Lock ativo por PID ${lockPid}. Use "encerrar-disparo" antes de liberar.`
-    };
-  }
-
-  try {
-    fs.unlinkSync(GLOBAL_LOCK_FILE);
-  } catch (e) {
-    return { ok: false, action: 'release-lock', message: `Falha ao remover lock: ${e.message}` };
-  }
-
-  return { ok: true, action: 'release-lock', message: 'Lock liberado com sucesso.' };
-}
-
-function acaoLimparFila() {
-  const ok = salvarJson(REPROCESS_QUEUE_FILE, []);
-  if (!ok) {
-    return { ok: false, action: 'clear-queue', message: 'Falha ao limpar fila de reprocessamento.' };
-  }
-
-  return { ok: true, action: 'clear-queue', message: 'Fila de reprocessamento limpa.' };
-}
-
-function acaoEncerrarDisparo() {
-  const lockRaw = lerJsonOpcional(GLOBAL_LOCK_FILE, null);
-  const lockPid = Number(lockRaw?.pid || 0) || null;
-
-  if (!lockRaw || !lockPid) {
-    return { ok: true, action: 'stop-disparo', message: 'Nenhum disparo ativo identificado.' };
-  }
-
-  const encerrou = encerrarPid(lockPid);
-  const lockRelease = acaoLiberarLock();
+function avaliarSaudeWhatsapp(statusPayload, workerHealthRaw) {
+  const status = String(statusPayload?.status || 'unknown').toLowerCase();
+  const ageSeconds = Number(statusPayload?.ageSeconds);
+  const readyLike = status === 'ready' || status === 'authenticated';
+  const workerPid = Number(workerHealthRaw?.pid || 0) || null;
+  const workerPidAtivo = workerPid ? pidEstaAtivo(workerPid) : false;
+  const workerUpdatedAt = Number(workerHealthRaw?.updatedAt || 0);
+  const workerAgeSeconds = workerUpdatedAt > 0
+    ? Math.floor((Date.now() - workerUpdatedAt) / 1000)
+    : null;
+  const workerRecent = workerAgeSeconds != null && workerAgeSeconds <= 300;
+  const cacheReadyIdle = readyLike && !workerPidAtivo && !workerRecent;
+  const threshold = cacheReadyIdle
+    ? WHATSAPP_READY_CACHE_THRESHOLD_SECONDS
+    : WHATSAPP_STALE_THRESHOLD_SECONDS;
+  const stale = Number.isFinite(ageSeconds) ? ageSeconds > threshold : true;
 
   return {
-    ok: encerrou || lockRelease.ok,
-    action: 'stop-disparo',
-    message: encerrou
-      ? `Sinal de encerramento enviado para PID ${lockPid}.`
-      : `PID ${lockPid} não estava ativo. ${lockRelease.message}`
-  };
-}
-
-function acaoRestartScheduler() {
-  const schedulerRaw = lerJsonOpcional(SCHEDULER_STATUS_FILE, null);
-  const schedulerPid = Number(schedulerRaw?.pid || 0) || null;
-
-  if (schedulerPid && pidEstaAtivo(schedulerPid)) {
-    encerrarPid(schedulerPid);
-  }
-
-  const start = iniciarProcessoDetached(SCHEDULER_SCRIPT);
-  if (!start.ok) {
-    return {
-      ok: false,
-      action: 'restart-scheduler',
-      message: `Falha ao reiniciar scheduler: ${start.error}`
-    };
-  }
-
-  return {
-    ok: true,
-    action: 'restart-scheduler',
-    message: `Scheduler reiniciado (PID ${start.pid}).`,
-    pid: start.pid
-  };
-}
-
-function acaoRestartStack() {
-  const stopDisparo = acaoEncerrarDisparo();
-  const clearQueue = acaoLimparFila();
-  const restartScheduler = acaoRestartScheduler();
-
-  return {
-    ok: stopDisparo.ok && clearQueue.ok && restartScheduler.ok,
-    action: 'restart-stack',
-    message: restartScheduler.ok
-      ? 'Stack operacional reiniciada (disparo encerrado, fila limpa, scheduler reiniciado).'
-      : 'Stack parcialmente reiniciada; verifique detalhes.',
-    details: {
-      stopDisparo,
-      clearQueue,
-      restartScheduler
-    }
+    ...statusPayload,
+    stale,
+    staleThresholdSeconds: threshold,
+    cacheReadyIdle
   };
 }
 
 function obterMonitorRuntime() {
   const agora = Date.now();
-  const whatsapp = lerWhatsappStatus();
+  const workerHealthRaw = lerJsonOpcional(DISPARO_WORKER_HEALTH_FILE, null);
+  const whatsapp = avaliarSaudeWhatsapp(lerWhatsappStatus(), workerHealthRaw);
   const schedulerRaw = lerJsonOpcional(SCHEDULER_STATUS_FILE, null);
   const lockRaw = lerJsonOpcional(GLOBAL_LOCK_FILE, null);
   const fila = lerJsonOpcional(REPROCESS_QUEUE_FILE, []);
@@ -310,6 +186,10 @@ function obterMonitorRuntime() {
     : null;
   const lockPid = Number(lockRaw?.pid || 0) || null;
   const lockPidAtivo = lockPid ? pidEstaAtivo(lockPid) : false;
+  const workerUpdatedAt = Number(workerHealthRaw?.updatedAt || 0);
+  const workerAgeSeconds = workerUpdatedAt > 0
+    ? Math.floor((agora - workerUpdatedAt) / 1000)
+    : null;
 
   const falhasUltimaHora = (falhas.falhas || []).filter((f) => {
     const ageMs = agora - Number(f.timestamp || 0);
@@ -356,6 +236,18 @@ function obterMonitorRuntime() {
         ageSeconds: whatsapp.ageSeconds,
         updatedAt: whatsapp.updatedAt,
         updatedAtISO: whatsapp.updatedAtISO
+      },
+      workerDisparo: {
+        status: workerHealthRaw?.status || 'unknown',
+        pid: Number(workerHealthRaw?.pid || 0) || null,
+        offerIndex: Number(workerHealthRaw?.offerIndex || 0),
+        offerTotal: Number(workerHealthRaw?.offerTotal || 0),
+        sentCount: Number(workerHealthRaw?.sentCount || 0),
+        queueSize: Number(workerHealthRaw?.queueSize || 0),
+        updatedAt: workerUpdatedAt || null,
+        updatedAtISO: workerHealthRaw?.updatedAtISO || null,
+        ageSeconds: workerAgeSeconds,
+        stale: workerAgeSeconds != null ? workerAgeSeconds > 300 : true
       }
     },
     fila: {
@@ -464,7 +356,8 @@ function obterStatusPoolMercadoLivre() {
 app.get('/api/dashboard', (req, res) => {
   const disparos = lerDisparosLog();
   const historico = lerHistorico();
-  const whatsapp = lerWhatsappStatus();
+  const workerHealthRaw = lerJsonOpcional(DISPARO_WORKER_HEALTH_FILE, null);
+  const whatsapp = avaliarSaudeWhatsapp(lerWhatsappStatus(), workerHealthRaw);
 
   res.json({
     sistema: {
@@ -486,7 +379,8 @@ app.get('/api/dashboard', (req, res) => {
 });
 
 app.get('/api/whatsapp-status', (req, res) => {
-  res.json(lerWhatsappStatus());
+  const workerHealthRaw = lerJsonOpcional(DISPARO_WORKER_HEALTH_FILE, null);
+  res.json(avaliarSaudeWhatsapp(lerWhatsappStatus(), workerHealthRaw));
 });
 
 app.get('/api/ofertas/enviadas', (req, res) => {
@@ -557,49 +451,25 @@ app.get('/api/monitor', (req, res) => {
   res.json(obterMonitorRuntime());
 });
 
-app.post('/api/monitor/action', (req, res) => {
-  const action = String(req.body?.action || '').trim().toLowerCase();
-
-  let result;
-  switch (action) {
-    case 'release-lock':
-      result = acaoLiberarLock();
-      break;
-    case 'clear-queue':
-      result = acaoLimparFila();
-      break;
-    case 'stop-disparo':
-      result = acaoEncerrarDisparo();
-      break;
-    case 'restart-scheduler':
-      result = acaoRestartScheduler();
-      break;
-    case 'restart-stack':
-      result = acaoRestartStack();
-      break;
-    default:
-      result = {
-        ok: false,
-        action,
-        message: 'Ação inválida. Use: release-lock, clear-queue, stop-disparo, restart-scheduler, restart-stack.'
-      };
-  }
-
-  res.status(result.ok ? 200 : 400).json(result);
-});
-
 app.get('/api/healthcheck', (req, res) => {
   const STALE_THRESHOLD_SECONDS = 300; // 5 min sem atualizacao = stale
   const FALHAS_ALARME_POR_HORA = 3;
   const UMA_HORA_MS = 60 * 60 * 1000;
 
-  const whatsapp = lerWhatsappStatus();
+  const workerHealthRaw = lerJsonOpcional(DISPARO_WORKER_HEALTH_FILE, null);
+  const whatsapp = avaliarSaudeWhatsapp(lerWhatsappStatus(), workerHealthRaw);
   const falhasLog = lerFalhasLog();
   const poolML = obterStatusPoolMercadoLivre();
   const alarmes = [];
+  const workerUpdatedAt = Number(workerHealthRaw?.updatedAt || 0);
+  const workerAgeSeconds = workerUpdatedAt > 0
+    ? Math.floor((Date.now() - workerUpdatedAt) / 1000)
+    : null;
+  const workerPid = Number(workerHealthRaw?.pid || 0) || null;
+  const workerPidAtivo = workerPid ? pidEstaAtivo(workerPid) : false;
 
   // Sessao WhatsApp desatualizada
-  if (whatsapp.stale || (whatsapp.ageSeconds != null && whatsapp.ageSeconds > STALE_THRESHOLD_SECONDS)) {
+  if (whatsapp.stale) {
     const minutos = whatsapp.ageSeconds ? Math.ceil(whatsapp.ageSeconds / 60) : null;
     alarmes.push({
       tipo: 'stale_session',
@@ -616,6 +486,22 @@ app.get('/api/healthcheck', (req, res) => {
       tipo: 'session_down',
       severidade: 'critico',
       mensagem: `Sessão WhatsApp em estado crítico: "${whatsapp.status}". Execute autenticar-sessao.js.`
+    });
+  }
+
+  if (workerAgeSeconds != null && workerAgeSeconds > STALE_THRESHOLD_SECONDS) {
+    alarmes.push({
+      tipo: 'worker_stale',
+      severidade: 'aviso',
+      mensagem: `Worker de disparo sem heartbeat ha ${Math.ceil(workerAgeSeconds / 60)} min.`
+    });
+  }
+
+  if (workerHealthRaw && workerPid && !workerPidAtivo) {
+    alarmes.push({
+      tipo: 'worker_pid_inativo',
+      severidade: 'critico',
+      mensagem: `Heartbeat indica PID ${workerPid}, mas processo nao esta ativo.`
     });
   }
 
@@ -658,6 +544,13 @@ app.get('/api/healthcheck', (req, res) => {
       status: whatsapp.status,
       stale: whatsapp.stale,
       ageSeconds: whatsapp.ageSeconds
+    },
+    workerDisparo: {
+      status: workerHealthRaw?.status || 'unknown',
+      pid: workerPid,
+      pidAtivo: workerPidAtivo,
+      ageSeconds: workerAgeSeconds,
+      stale: workerAgeSeconds != null ? workerAgeSeconds > STALE_THRESHOLD_SECONDS : true
     },
     falhasUltimaHora: falhasRecentes.length,
     poolMercadoLivre: poolML

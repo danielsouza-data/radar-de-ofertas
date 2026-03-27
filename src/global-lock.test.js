@@ -59,6 +59,32 @@ test('acquireGlobalLock replaces stale lock', () => {
   releaseGlobalLock(lockPath);
 });
 
+test('acquireGlobalLock recupera lock com arquivo invalido (stale/corrompido)', () => {
+  const lockPath = getTempLockPath();
+  fs.writeFileSync(lockPath, '{json-invalido');
+
+  const result = acquireGlobalLock(lockPath, 'recovered_owner', 60_000);
+  assert.equal(result.acquired, true);
+
+  const parsed = readLock(lockPath);
+  assert.equal(parsed.owner, 'recovered_owner');
+
+  releaseGlobalLock(lockPath);
+});
+
+test('acquireGlobalLock nega segunda aquisicao mesmo com chamadas seguidas imediatas', () => {
+  const lockPath = getTempLockPath();
+
+  const first = acquireGlobalLock(lockPath, 'owner_a', 60_000);
+  const second = acquireGlobalLock(lockPath, 'owner_b', 60_000);
+
+  assert.equal(first.acquired, true);
+  assert.equal(second.acquired, false);
+  assert.equal(second.reason, 'active_lock');
+
+  releaseGlobalLock(lockPath);
+});
+
 test('isLockActive returns false for malformed lock', () => {
   const malformed = { pid: 'abc', createdAt: 'not-a-number' };
   assert.equal(isLockActive(malformed, 60_000), false);

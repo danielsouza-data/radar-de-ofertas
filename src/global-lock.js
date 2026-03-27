@@ -46,27 +46,67 @@ function isLockActive(lockData, staleMs = DEFAULT_STALE_MS) {
 function acquireGlobalLock(lockFilePath, owner, staleMs = DEFAULT_STALE_MS) {
   ensureParentDir(lockFilePath);
 
-  const current = readLock(lockFilePath);
-  if (isLockActive(current, staleMs)) {
-    return {
-      acquired: false,
-      reason: 'active_lock',
-      lock: current
+  // Tenta criar o lock de forma atomica. Se ja existir, valida se está ativo ou stale.
+  for (let tentativa = 0; tentativa < 2; tentativa++) {
+    const lockData = {
+      pid: process.pid,
+      owner: owner || 'unknown',
+      createdAt: Date.now(),
+      createdAtISO: new Date().toISOString(),
+      hostname: process.env.COMPUTERNAME || null
     };
+
+    try {
+      const fd = fs.openSync(lockFilePath, 'wx');
+      try {
+        fs.writeFileSync(fd, JSON.stringify(lockData, null, 2));
+      } finally {
+        fs.closeSync(fd);
+      }
+
+      return {
+        acquired: true,
+        lock: lockData
+      };
+    } catch (err) {
+      if (!err || err.code !== 'EEXIST') {
+        return {
+          acquired: false,
+          reason: 'lock_create_error',
+          error: err?.message || String(err),
+          lock: readLock(lockFilePath)
+        };
+      }
+
+      const current = readLock(lockFilePath);
+      if (isLockActive(current, staleMs)) {
+        return {
+          acquired: false,
+          reason: 'active_lock',
+          lock: current
+        };
+      }
+
+      // Lock stale/invalido: tenta remover e repetir uma unica vez.
+      try {
+        if (fs.existsSync(lockFilePath)) {
+          fs.unlinkSync(lockFilePath);
+        }
+      } catch {
+        // Se nao conseguiu remover, retorna lock ativo para evitar corrida destrutiva.
+        return {
+          acquired: false,
+          reason: 'stale_lock_remove_error',
+          lock: current
+        };
+      }
+    }
   }
 
-  const lockData = {
-    pid: process.pid,
-    owner: owner || 'unknown',
-    createdAt: Date.now(),
-    createdAtISO: new Date().toISOString(),
-    hostname: process.env.COMPUTERNAME || null
-  };
-
-  fs.writeFileSync(lockFilePath, JSON.stringify(lockData, null, 2));
   return {
-    acquired: true,
-    lock: lockData
+    acquired: false,
+    reason: 'unknown_lock_state',
+    lock: readLock(lockFilePath)
   };
 }
 

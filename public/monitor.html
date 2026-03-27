@@ -80,6 +80,24 @@
       <div class="section-header">
         <h2>Ações Rápidas</h2>
       </div>
+      <div class="monitor-control-plane-config">
+        <div class="monitor-control-plane-fields">
+          <label class="monitor-field">
+            <span>URL do control plane</span>
+            <input id="control-plane-url" type="url" placeholder="http://localhost:3001">
+          </label>
+          <label class="monitor-field">
+            <span>Token opcional</span>
+            <input id="control-plane-token" type="password" placeholder="x-control-token">
+          </label>
+        </div>
+        <div class="monitor-control-plane-actions">
+          <button id="btn-save-control-plane" type="button" class="btn-secondary">Salvar acesso</button>
+          <button id="btn-test-control-plane" type="button" class="btn-secondary">Testar conexão</button>
+          <button id="btn-clear-control-plane" type="button" class="btn-secondary">Limpar acesso</button>
+        </div>
+        <p id="control-plane-status" class="monitor-control-plane-status">Usando configuração automática.</p>
+      </div>
       <div class="monitor-actions" id="monitor-actions">
         <button type="button" class="btn-secondary" data-action="stop-disparo">Encerrar disparo ativo</button>
         <button type="button" class="btn-secondary" data-action="release-lock">Liberar lock órfão</button>

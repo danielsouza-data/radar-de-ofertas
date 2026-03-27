@@ -71,6 +71,8 @@ node disparo-completo.js
 - Disparo pontual deve ser feito manualmente quando solicitado
 - Ofertas sem imagem sao puladas automaticamente
 - O dashboard le os logs locais e o status do WhatsApp
+- Health operacional inclui heartbeat do worker de disparo em `data/disparo-worker-health.json`
+- Control plane operacional agora roda separado em `bin/control-plane-server.js`
 - A sessao autenticada fica salva em `.wwebjs_sessions/producao/`
 
 ## Runbook de homologacao e producao
@@ -85,6 +87,23 @@ node disparo-completo.js
 - Encerrada a homologacao, restaurar `WHATSAPP_CHANNEL_NAME` e `WHATSAPP_CHANNEL_ID` para o grupo normal e reiniciar `agendador-envios.js` e `bin/dashboard-server.js`
 - Antes de voltar para producao, encerrar processos/sessoes de teste e limpar `data/disparo-global.lock` se existir
 - No encerramento das 17:00, o monitor envia a mensagem final no grupo normal e depois reposiciona o `.env` para o grupo de testes automaticamente
+- Lock global agora usa aquisicao atomica para reduzir risco de corrida entre instancias
+- Integracoes externas de Shopee/ML e sync de preco agora usam circuit breaker para degradacao graciosa em falhas repetidas
+
+## Control Plane
+
+- Iniciar: `npm run control:plane`
+- Health: `GET http://localhost:3001/api/control/health`
+- Acoes: `POST http://localhost:3001/api/control/action`
+  - `release-lock`, `clear-queue`, `stop-disparo`, `restart-scheduler`, `restart-stack`
+- Se `CONTROL_PLANE_TOKEN` estiver definido no `.env`, enviar header `x-control-token`
+
+## Segurança operacional
+
+- Sanitizacao basica dos campos externos (produto/marketplace/link) aplicada antes do envio de mensagem ao WhatsApp
+- Auditoria de dependencias: `npm run security:audit`
+  - Nivel de corte padrao: `moderate`
+  - Para ajustar: `SECURITY_AUDIT_MAX_LEVEL=high npm run security:audit`
 
 ## Mercado Livre
 
@@ -92,6 +111,12 @@ node disparo-completo.js
 - Mapa produto -> shortlink persistido em `mercadolivre-linkbuilder-map.txt`
 - Anti-repeticao de ML agora considera link enviado, `source_link/raw_link` e `product_id`, evitando reenvio do mesmo produto com shortlink diferente
 - O Link Builder pode recusar algumas URLs; nesses casos, elas devem ser descartadas sem quebrar o pareamento de ordem do lote
+- Pre-validacao formal de lote (obrigatoria antes de merge):
+  - Comando (dry-run): `node scripts/prevalidate-ml-linkbuilder-batch.js --input data/ml-linkbuilder-input-30f.txt --output data/ml-linkbuilder-output-30f.txt`
+  - O script valida contagem (entrada == shortlinks), duplicidade e colisao com pool/mapa ja existentes
+  - Artefatos gerados: arquivo de pares e relatorio JSON com status `approved`
+  - Merge oficial (somente se aprovado): adicionar `--apply` no mesmo comando
+  - Atalho operacional: `validar-ml-lote.bat` (auto dry-run), `validar-ml-lote.bat auto apply` (auto merge) ou `validar-ml-lote.bat 30f` / `validar-ml-lote.bat 30f apply`
 
 ## Atualizacoes recentes (Mar/2026)
 

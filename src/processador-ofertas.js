@@ -25,6 +25,7 @@ const OFERTAS_CURADAS = require('./ofertas-curadas.js');
 // Importar API Shopee Affiliate (com autenticação corrigida)
 const ShopeeAffiliateAPI = require('./shopee-api-real.js');
 const { carregarLinksMercadoLivreArquivo, deduplicarLinks, ehLinkMercadoLivreCurto, calcularCiclosPorJanela } = require('./utils-link');
+const { createCircuitBreaker, CircuitBreakerOpenError } = require('./resilience/circuit-breaker');
 
 console.log('='.repeat(70));
 console.log('  🎯 RADAR DE OFERTAS - SISTEMA COMPLETO');
@@ -84,6 +85,34 @@ if (ML_LINKBUILDER_LINKS_ENV.length > 0) {
 }
 
 const FILE_HISTORICO = path.join(__dirname, 'historico-ofertas.json');
+
+const shopeeApiBreaker = createCircuitBreaker({
+  name: 'shopee-api',
+  failureThreshold: 3,
+  resetTimeoutMs: 30000,
+  logger: console
+});
+
+const mlOAuthBreaker = createCircuitBreaker({
+  name: 'ml-oauth',
+  failureThreshold: 3,
+  resetTimeoutMs: 30000,
+  logger: console
+});
+
+const mlPublicBreaker = createCircuitBreaker({
+  name: 'ml-public',
+  failureThreshold: 3,
+  resetTimeoutMs: 30000,
+  logger: console
+});
+
+const mlScrapingBreaker = createCircuitBreaker({
+  name: 'ml-scraping',
+  failureThreshold: 2,
+  resetTimeoutMs: 45000,
+  logger: console
+});
 
 // ============ FUNÇÕES AUXILIARES ============
 
@@ -470,10 +499,13 @@ async function buscarMercadoLivreScraping(keyword = 'eletrônicos', limite = 10)
 
     const termo = encodeURIComponent(keyword);
     const url = `https://lista.mercadolivre.com.br/${termo}`;
-    const response = await axios.get(url, {
-      timeout: 15000,
-      headers: MERCADO_LIVRE_HEADERS
-    });
+    const response = await mlScrapingBreaker.execute(
+      () => axios.get(url, {
+        timeout: 15000,
+        headers: MERCADO_LIVRE_HEADERS
+      }),
+      'buscarMercadoLivreScraping'
+    );
 
     const $ = cheerio.load(response.data);
     const itens = [];
@@ -534,6 +566,10 @@ async function buscarMercadoLivreScraping(keyword = 'eletrônicos', limite = 10)
 
     console.warn('[MERCADO LIVRE WEB] Nenhum produto extraído da listagem');
   } catch (error) {
+    if (error instanceof CircuitBreakerOpenError) {
+      console.warn(`[MERCADO LIVRE WEB] Circuit breaker aberto: ${error.message}`);
+      return [];
+    }
     console.warn(`[MERCADO LIVRE WEB] Erro: ${error.message}`);
   }
 
@@ -553,7 +589,10 @@ async function buscarShopeeGraphQL(limite = 10) {
 
     // Buscar produtos com preço real (productOfferV2)
     console.log('[SHOPEE] Buscando produtos com comissão...');
-    const produtos = await api.buscarProdutos(Math.max(limite, 20));
+    const produtos = await shopeeApiBreaker.execute(
+      () => api.buscarProdutos(Math.max(limite, 20)),
+      'buscarShopeeGraphQL'
+    );
 
     if (produtos.length > 0) {
       console.log(`[SHOPEE] ✓ ${produtos.length} produtos obtidos`);
@@ -580,6 +619,9 @@ async function buscarShopeeGraphQL(limite = 10) {
 
     console.warn('[SHOPEE AFFILIATE API] Nenhum produto retornado');
   } catch (error) {
+    if (error instanceof CircuitBreakerOpenError) {
+      console.warn(`[SHOPEE AFFILIATE API] Circuit breaker aberto: ${error.message}`);
+    }
     console.warn(`[SHOPEE AFFILIATE API] Erro: ${error.message}`);
   }
 
@@ -621,16 +663,19 @@ async function buscarMercadoLivre(keyword = 'eletrônicos', limite = 10) {
       console.log('[OK] Token de acesso gerado');
 
       // Buscar com token
-      const response = await axios.get(
-        'https://api.mercadolibre.com/sites/MLB/search',
-        {
-          params: queryParams,
-          headers: {
-            ...MERCADO_LIVRE_HEADERS,
-            'Authorization': `Bearer ${token}`
-          },
-          timeout: 15000
-        }
+      const response = await mlOAuthBreaker.execute(
+        () => axios.get(
+          'https://api.mercadolibre.com/sites/MLB/search',
+          {
+            params: queryParams,
+            headers: {
+              ...MERCADO_LIVRE_HEADERS,
+              'Authorization': `Bearer ${token}`
+            },
+            timeout: 15000
+          }
+        ),
+        'buscarMercadoLivreOAuth'
       );
 
       if (response.data?.results && response.data.results.length > 0) {
@@ -643,19 +688,25 @@ async function buscarMercadoLivre(keyword = 'eletrônicos', limite = 10) {
       console.warn('[MERCADO LIVRE OAuth] Credenciais ausentes, tentando busca pública');
     }
   } catch (error) {
+    if (error instanceof CircuitBreakerOpenError) {
+      console.warn(`[MERCADO LIVRE OAuth] Circuit breaker aberto: ${error.message}`);
+    }
     console.warn(`[MERCADO LIVRE OAuth] Erro: ${error.response?.data?.message || error.message}`);
   }
 
   // Fallback 1 - Busca pública sem OAuth
   try {
     console.log('[MERCADO LIVRE PUBLIC] Tentando busca sem token...');
-    const response = await axios.get(
-      'https://api.mercadolibre.com/sites/MLB/search',
-      {
-        params: queryParams,
-        headers: MERCADO_LIVRE_HEADERS,
-        timeout: 15000
-      }
+    const response = await mlPublicBreaker.execute(
+      () => axios.get(
+        'https://api.mercadolibre.com/sites/MLB/search',
+        {
+          params: queryParams,
+          headers: MERCADO_LIVRE_HEADERS,
+          timeout: 15000
+        }
+      ),
+      'buscarMercadoLivrePublic'
     );
 
     if (response.data?.results && response.data.results.length > 0) {
@@ -665,6 +716,9 @@ async function buscarMercadoLivre(keyword = 'eletrônicos', limite = 10) {
 
     console.warn('[MERCADO LIVRE PUBLIC] API retornou vazio');
   } catch (error) {
+    if (error instanceof CircuitBreakerOpenError) {
+      console.warn(`[MERCADO LIVRE PUBLIC] Circuit breaker aberto: ${error.message}`);
+    }
     console.warn(`[MERCADO LIVRE PUBLIC] Erro: ${error.response?.data?.message || error.message}`);
   }
 

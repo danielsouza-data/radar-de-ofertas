@@ -19,6 +19,8 @@ const {
 } = require('./src/global-lock');
 const { patchConsole } = require('./src/log-mask');
 const { PATHS, ensureDirectories } = require('./src/config/paths');
+const { createDeliveryService } = require('./src/services/delivery-service');
+const { createCircuitBreaker, CircuitBreakerOpenError } = require('./src/resilience/circuit-breaker');
 require('dotenv').config();
 patchConsole();
 
@@ -55,7 +57,9 @@ const PRIORITY_MARKETPLACE_RAW = String(process.env.RADAR_PRIORITY_MARKETPLACE |
 const LOCK_FILE = PATHS.GLOBAL_LOCK;
 const FAIL_LOG_FILE = PATHS.DISPAROS_FALHAS;
 const FILA_REPROCESS_FILE = PATHS.FILA_REPROCESSAMENTO;
+const WORKER_HEALTH_FILE = PATHS.DISPARO_WORKER_HEALTH;
 const LOCK_OWNER = process.env.SCHEDULED_RUN === '1' ? 'scheduled_disparo' : 'manual_disparo';
+const WHATSAPP_READY_HEARTBEAT_MS = Math.max(10000, parseEnvInt(process.env.WHATSAPP_READY_HEARTBEAT_MS, 60000));
 
 const isTestContext =
   RADAR_TEST_MODE ||
@@ -83,8 +87,37 @@ console.log(`\n[SESSION] ID: ${SESSION_ID} (REUTILIZANDO)`);
 console.log(`[IMPORTANTE] Execute autenticar-sessao.js primeiro!\n`);
 
 // Formatar mensagem WhatsApp
+function sanitizarTextoMensagem(valor, maxLen = 160) {
+  const bruto = String(valor || '');
+
+  // Remove caracteres de controle e compacta espacos/quebras.
+  const limpo = bruto
+    .replace(/[\u0000-\u001F\u007F]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  if (!limpo) return 'N/D';
+  return limpo.length > maxLen ? `${limpo.slice(0, maxLen - 1)}…` : limpo;
+}
+
+function sanitizarLinkMensagem(link) {
+  const raw = String(link || '').trim();
+  if (!raw) return '';
+
+  try {
+    const u = new URL(raw);
+    if (!['http:', 'https:'].includes(u.protocol)) return '';
+    return u.toString();
+  } catch {
+    return '';
+  }
+}
+
 function formatarMensagem(oferta, numero, total) {
-  const rating = '⭐'.repeat(Math.min(Math.round(oferta.rating), 5));
+  const rating = '⭐'.repeat(Math.min(Math.round(Number(oferta.rating || 0)), 5));
+  const nomeProduto = sanitizarTextoMensagem(oferta.product_name, 180);
+  const marketplace = sanitizarTextoMensagem(oferta.marketplace, 40);
+  const linkSeguro = sanitizarLinkMensagem(oferta.link);
   const precoAtual = oferta.price.toLocaleString('pt-BR', {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2
@@ -103,14 +136,14 @@ function formatarMensagem(oferta, numero, total) {
 
   return `🛒 *Radar de Ofertas*
 
-${oferta.product_name}
-🏪 ${oferta.marketplace}
+${nomeProduto}
+🏪 ${marketplace}
 
 ${blocoPreco}
 
 ${rating}
 
-🔗 ${oferta.link}`;
+🔗 ${linkSeguro || 'Link indisponivel no momento'}`;
 }
 
 // Cliente WhatsApp - com store customizado
@@ -144,10 +177,21 @@ let cicloReprocessamento = 0;
 let filaReprocessamento = carregarFilaReprocessamento();
 const tentativasPorOferta = new Map();
 let encerrandoIntencionalmente = false;
+let whatsappHeartbeatTimer = null;
 
-function sleep(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
+const deliveryService = createDeliveryService({
+  client,
+  MessageMedia,
+  ackTimeoutMs: ACK_TIMEOUT_MS,
+  logger: console
+});
+
+const mlPriceSyncBreaker = createCircuitBreaker({
+  name: 'ml-price-sync',
+  failureThreshold: 3,
+  resetTimeoutMs: 30000,
+  logger: console
+});
 
 function salvarFilaReprocessamento() {
   try {
@@ -165,110 +209,6 @@ function carregarFilaReprocessamento() {
   } catch {
     return [];
   }
-}
-
-function isErroRecuperavelEnvio(error) {
-  const msg = String(error?.message || '').toLowerCase();
-  return (
-    msg.includes('detached frame') ||
-    msg.includes('execution context was destroyed') ||
-    msg.includes('cannot find context')
-  );
-}
-
-async function carregarImagemMedia(imageUrl) {
-  try {
-    const media = await MessageMedia.fromUrl(imageUrl, { unsafeMime: true });
-    return media;
-  } catch (err) {
-    console.warn(`[MEDIA_LOAD_ERR] Nao foi possivel carregar imagem: ${err.message}`);
-    return null;
-  }
-}
-
-async function enviarComRecuperacao(chatId, msg, media = null) {
-  const maxTentativas = 3;
-  let houveRecuperacao = false;
-  let ultimoErro = null;
-
-  for (let tentativa = 1; tentativa <= maxTentativas; tentativa++) {
-    try {
-      const sent = media
-        ? await client.sendMessage(chatId, media, { caption: msg })
-        : await client.sendMessage(chatId, msg);
-      const ack = await aguardarAckMensagem(sent?.id?._serialized, ACK_TIMEOUT_MS);
-
-      if (ack < 1) {
-        throw new Error(`ACK nao confirmado (ack=${ack})`);
-      }
-
-      return {
-        tentativas: tentativa,
-        houveRecuperacao,
-        ultimoErro: ultimoErro ? String(ultimoErro.message || ultimoErro) : null,
-        ackFinal: ack,
-        messageId: sent?.id?._serialized || null
-      };
-    } catch (error) {
-      ultimoErro = error;
-      const recuperavel = isErroRecuperavelEnvio(error);
-      const ultimaTentativa = tentativa === maxTentativas;
-
-      if (!recuperavel || ultimaTentativa) {
-        throw error;
-      }
-
-      console.warn(`[RECOVERY] Erro recuperavel no envio (${error.message}). Tentando recuperar sessao...`);
-      houveRecuperacao = true;
-
-      try {
-        if (client.pupPage && !client.pupPage.isClosed()) {
-          await client.pupPage.reload({ waitUntil: 'networkidle0', timeout: 60000 });
-        }
-      } catch (reloadError) {
-        console.warn(`[RECOVERY] Falha ao recarregar pagina do WhatsApp: ${reloadError.message}`);
-      }
-
-      const backoffMs = tentativa * 5000;
-      console.warn(`[RECOVERY] Aguardando ${backoffMs / 1000}s antes da nova tentativa...`);
-      await sleep(backoffMs);
-    }
-  }
-}
-
-async function aguardarAckMensagem(messageId, timeoutMs) {
-  if (!messageId) return 0;
-
-  const inicio = Date.now();
-  let ultimoAck = 0;
-  let lastPollError = null;
-
-  while (Date.now() - inicio < timeoutMs) {
-    try {
-      const msgObj = await client.getMessageById(messageId);
-      const ack = Number(msgObj?.ack ?? 0);
-      ultimoAck = ack;
-
-      // >=1 significa que o servidor recebeu a mensagem.
-      if (ack >= 1) {
-        return ack;
-      }
-
-      // -1 indica erro no envio.
-      if (ack === -1) {
-        return ack;
-      }
-    } catch (err) {
-      if (!lastPollError || lastPollError !== err.message) {
-        console.warn(`[ACK_POLL_WARN] Erro no poll de ACK: ${err.message}`);
-        lastPollError = err.message;
-      }
-    }
-
-    await sleep(2000);
-  }
-
-  return ultimoAck;
 }
 
 // Arquivo de log de disparos
@@ -289,6 +229,42 @@ function atualizarStatusWhatsapp(status, extra = {}) {
   } catch (err) {
     console.error('[WA_STATUS_ERR]', err.message);
   }
+}
+
+function atualizarHealthWorker(status, extra = {}) {
+  try {
+    const payload = {
+      status,
+      updatedAt: Date.now(),
+      updatedAtISO: new Date().toISOString(),
+      pid: process.pid,
+      lockOwner: LOCK_OWNER,
+      sessionId: SESSION_ID,
+      offerIndex: index,
+      offerTotal: ofertas.length,
+      sentCount: enviadas,
+      skippedNoImage: puladasSemImagem,
+      queueSize: Array.isArray(filaReprocessamento) ? filaReprocessamento.length : 0,
+      ...extra
+    };
+
+    fs.writeFileSync(WORKER_HEALTH_FILE, JSON.stringify(payload, null, 2));
+  } catch (err) {
+    console.error('[WORKER_HEALTH_ERR]', err.message);
+  }
+}
+
+function stopWhatsappHeartbeat() {
+  if (!whatsappHeartbeatTimer) return;
+  clearInterval(whatsappHeartbeatTimer);
+  whatsappHeartbeatTimer = null;
+}
+
+function startWhatsappHeartbeat(status, detail) {
+  stopWhatsappHeartbeat();
+  whatsappHeartbeatTimer = setInterval(() => {
+    atualizarStatusWhatsapp(status, { detail });
+  }, WHATSAPP_READY_HEARTBEAT_MS);
 }
 
 function liberarLock() {
@@ -498,14 +474,17 @@ async function sincronizarPrecoMercadoLivre(oferta) {
   if (!urlPreco) return;
 
   try {
-    const response = await axios.get(urlPreco, {
-      timeout: 15000,
-      maxRedirects: 5,
-      headers: {
-        'User-Agent': 'Mozilla/5.0',
-        'Accept-Language': 'pt-BR,pt;q=0.9'
-      }
-    });
+    const response = await mlPriceSyncBreaker.execute(
+      () => axios.get(urlPreco, {
+        timeout: 15000,
+        maxRedirects: 5,
+        headers: {
+          'User-Agent': 'Mozilla/5.0',
+          'Accept-Language': 'pt-BR,pt;q=0.9'
+        }
+      }),
+      'sincronizarPrecoMercadoLivre'
+    );
 
     const idEsperado = extrairIdMercadoLivreDeLink(urlPreco) || String(oferta.product_id || '');
     const finalUrl = response?.request?.res?.responseUrl || oferta.link;
@@ -528,6 +507,10 @@ async function sincronizarPrecoMercadoLivre(oferta) {
       console.log(`[ML_PRICE_SYNC] ${oferta.product_name}: ${precoAnterior.toFixed(2)} -> ${precoAtual.toFixed(2)}`);
     }
   } catch (err) {
+    if (err instanceof CircuitBreakerOpenError) {
+      console.warn(`[ML_PRICE_SYNC_WARN] Circuit breaker aberto: ${err.message}`);
+      return;
+    }
     console.warn(`[ML_PRICE_SYNC_WARN] ${err.message}`);
   }
 }
@@ -680,6 +663,11 @@ async function enviarProxima() {
     }
     console.log('='.repeat(70));
     console.log('\n[ENCERRAMENTO] Encerrando processo gracefully - Cron reiniciará em 5 minutos\n');
+    atualizarHealthWorker('cycle_completed', {
+      sentCount: enviadas,
+      skippedNoImage: puladasSemImagem,
+      reprocessCycles: cicloReprocessamento
+    });
     encerrandoIntencionalmente = true;
 
     try {
@@ -693,6 +681,11 @@ async function enviarProxima() {
 
   const oferta = ofertas[index];
   const numero = index + 1;
+  atualizarHealthWorker('sending', {
+    currentOfferNumber: numero,
+    currentOfferName: oferta?.product_name || null,
+    currentOfferMarketplace: oferta?.marketplace || null
+  });
 
   try {
     if (!ofertaTemImagem(oferta)) {
@@ -708,7 +701,7 @@ async function enviarProxima() {
     }
 
     const imageUrl = oferta?.imageUrl || oferta?.image_url || '';
-    const media = await carregarImagemMedia(imageUrl);
+    const media = await deliveryService.loadMedia(imageUrl);
     if (!media) {
       console.log(`\n[SKIP_SEM_IMAGEM] Imagem inacessivel (${numero}/${ofertas.length}): ${oferta?.product_name || 'sem nome'}`);
       puladasSemImagem++;
@@ -732,6 +725,7 @@ async function enviarProxima() {
     if (RADAR_DRY_RUN) {
       console.log('\n[DRY_RUN] Envio real ignorado (nenhuma mensagem foi enviada ao WhatsApp).');
       enviadas++;
+      atualizarHealthWorker('dry_run_progress');
       index++;
 
       if (index < ofertas.length) {
@@ -745,7 +739,7 @@ async function enviarProxima() {
 
     console.log('\n[STATUS] Transmitindo...');
 
-    const metaEnvio = await enviarComRecuperacao(CHANNEL_ID, msg, media);
+    const metaEnvio = await deliveryService.sendWithRecovery(CHANNEL_ID, msg, media);
     console.log(`[OK] ✅ Enviada! (ack=${metaEnvio.ackFinal}, id=${metaEnvio.messageId || 'n/a'})`);
     if (metaEnvio.houveRecuperacao) {
       console.log(`[RECOVERY] Envio recuperado apos ${metaEnvio.tentativas} tentativa(s).`);
@@ -756,6 +750,10 @@ async function enviarProxima() {
     console.log(`[LOG] Registrada no histórico de disparos`);
 
     enviadas++;
+    atualizarHealthWorker('send_ok', {
+      ackFinal: metaEnvio.ackFinal,
+      messageId: metaEnvio.messageId || null
+    });
     index++;
 
     if (index < ofertas.length) {
@@ -785,6 +783,10 @@ async function enviarProxima() {
       reprocessamentoAgendado,
       erro: error.message
     });
+    atualizarHealthWorker('send_error', {
+      error: error.message,
+      reprocessamentoAgendado
+    });
 
     index++;
 
@@ -805,6 +807,8 @@ client.on('ready', async () => {
   cicloIniciado = true;
   console.log('\n[OK] WhatsApp pronto!\n');
   atualizarStatusWhatsapp('ready', { detail: 'Sessao conectada e pronta para envio' });
+  atualizarHealthWorker('ready');
+  startWhatsappHeartbeat('ready', 'Sessao conectada e pronta para envio');
 
   try {
     // Processar ofertas
@@ -820,15 +824,18 @@ client.on('ready', async () => {
     if (ofertas.length === 0) {
       console.error('\n❌ Nenhuma oferta para enviar\n');
       client.destroy();
+      atualizarHealthWorker('no_offers');
       liberarLock();
       process.exit(1);
     }
 
     console.log(`\n[BEGINDO ENVIO] ${ofertas.length} ofertas para enviar\n`);
+    atualizarHealthWorker('cycle_started', { offerTotal: ofertas.length });
     enviarProxima();
 
   } catch (error) {
     console.error(`\n[FATAL] ${error.message}\n`);
+    atualizarHealthWorker('fatal_error', { error: error.message });
     client.destroy();
     liberarLock();
     process.exit(1);
@@ -836,6 +843,7 @@ client.on('ready', async () => {
 });
 
 client.on('qr', (qr) => {
+  stopWhatsappHeartbeat();
   atualizarStatusWhatsapp('qr_required', { detail: 'QR Code gerado, aguardando autenticacao' });
   console.log('\n' + '='.repeat(70));
   console.log('  📱 QR CODE GERADO - ESCANEIE COM WHATSAPP');
@@ -852,7 +860,9 @@ client.on('error', (error) => {
   if (encerrandoIntencionalmente) {
     return;
   }
+  stopWhatsappHeartbeat();
   atualizarStatusWhatsapp('error', { detail: error.message || 'Erro no client WhatsApp' });
+  atualizarHealthWorker('client_error', { error: error.message || 'Erro no client WhatsApp' });
   console.error('\n[CLIENT_ERR]', error.message);
   client.destroy().catch(() => {});
   liberarLock();
@@ -861,24 +871,40 @@ client.on('error', (error) => {
 
 client.on('authenticated', () => {
   atualizarStatusWhatsapp('authenticated', { detail: 'Sessao autenticada' });
+  atualizarHealthWorker('authenticated');
+  startWhatsappHeartbeat('authenticated', 'Sessao autenticada');
 });
 
 client.on('auth_failure', (message) => {
+  stopWhatsappHeartbeat();
   atualizarStatusWhatsapp('auth_failure', { detail: message || 'Falha na autenticacao' });
+  atualizarHealthWorker('auth_failure', { error: message || 'Falha na autenticacao' });
 });
 
 client.on('disconnected', (reason) => {
+  stopWhatsappHeartbeat();
   atualizarStatusWhatsapp('disconnected', { detail: String(reason || 'Desconectado') });
+  atualizarHealthWorker('disconnected', { reason: String(reason || 'Desconectado') });
 });
 
 client.on('change_state', (state) => {
   atualizarStatusWhatsapp('state_change', { detail: String(state || 'Estado alterado') });
+  atualizarHealthWorker('state_change', { state: String(state || 'Estado alterado') });
+
+  const stateRaw = String(state || '').toUpperCase();
+  if (stateRaw === 'CONNECTED') {
+    startWhatsappHeartbeat('ready', 'Sessao conectada e pronta para envio');
+  } else {
+    stopWhatsappHeartbeat();
+  }
 });
 
 // Tratar sinais de encerramento
 process.on('SIGINT', () => {
   console.log('\n[SIGINT] Encerrando gracefully...');
+  stopWhatsappHeartbeat();
   atualizarStatusWhatsapp('stopped', { detail: 'Processo encerrado por SIGINT' });
+  atualizarHealthWorker('stopped', { signal: 'SIGINT' });
   salvarFilaReprocessamento();
   liberarLock();
   client.destroy().catch(() => {});
@@ -887,7 +913,9 @@ process.on('SIGINT', () => {
 
 process.on('SIGTERM', () => {
   console.log('\n[SIGTERM] Encerrando gracefully...');
+  stopWhatsappHeartbeat();
   atualizarStatusWhatsapp('stopped', { detail: 'Processo encerrado por SIGTERM' });
+  atualizarHealthWorker('stopped', { signal: 'SIGTERM' });
   salvarFilaReprocessamento();
   liberarLock();
   client.destroy().catch(() => {});
@@ -901,6 +929,7 @@ process.on('exit', () => {
 
 ensureDirectories();
 console.log('\n[INIT] Inicializando WhatsApp...\n');
+atualizarHealthWorker('initializing');
 const lockResult = acquireGlobalLock(LOCK_FILE, LOCK_OWNER, LOCK_STALE_MS);
 
 if (!lockResult.acquired) {
@@ -908,9 +937,11 @@ if (!lockResult.acquired) {
   const pid = lockResult.lock?.pid || 'n/a';
   console.log(`[LOCK] Disparo nao iniciado. Outro processo ativo possui lock global (owner=${owner}, pid=${pid}).`);
   atualizarStatusWhatsapp('busy', { detail: `Lock global ativo por ${owner} (pid ${pid})` });
+  atualizarHealthWorker('busy_lock', { lockOwner: owner, lockPid: pid });
   process.exit(0);
 }
 
 lockAcquired = true;
 atualizarStatusWhatsapp('initializing', { detail: `Inicializando cliente WhatsApp (${LOCK_OWNER})` });
+atualizarHealthWorker('lock_acquired');
 client.initialize();

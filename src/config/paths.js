@@ -35,6 +35,7 @@ const DATA_FILES = {
   DISPAROS_LOG: path.join(DIRS.DATA, 'disparos-log.json'),
   HISTORICO_OFERTAS: path.join(DIRS.SRC, 'historico-ofertas.json'),
   WHATSAPP_STATUS: path.join(DIRS.DATA, 'whatsapp-status.json'),
+  DISPARO_WORKER_HEALTH: path.join(DIRS.DATA, 'disparo-worker-health.json'),
   DISPAROS_FALHAS: path.join(DIRS.DATA, 'disparos-falhas.json'),
   SCHEDULER_STATUS: path.join(DIRS.DATA, 'scheduler-status.json'),
   GLOBAL_LOCK: path.join(DIRS.DATA, 'disparo-global.lock'),

@@ -1,6 +1,100 @@
 const REFRESH_MS = 10000;
 const THEME_KEY = 'radar-dashboard-theme';
+const CONTROL_PLANE_URL_KEY = 'radar-control-plane-url';
+const CONTROL_PLANE_TOKEN_KEY = 'radar-control-plane-token';
 let intervalId = null;
+
+function getControlPlaneBaseUrl() {
+  const saved = String(localStorage.getItem(CONTROL_PLANE_URL_KEY) || '').trim();
+  if (saved) return saved.replace(/\/$/, '');
+
+  const protocol = window.location.protocol === 'https:' ? 'https:' : 'http:';
+  const host = window.location.hostname || 'localhost';
+  const port = '3001';
+  return `${protocol}//${host}:${port}`;
+}
+
+function getControlPlaneHeaders() {
+  const headers = { 'Content-Type': 'application/json' };
+  const token = String(localStorage.getItem(CONTROL_PLANE_TOKEN_KEY) || '').trim();
+  if (token) {
+    headers['x-control-token'] = token;
+  }
+  return headers;
+}
+
+function getConfiguredControlPlaneToken() {
+  return String(localStorage.getItem(CONTROL_PLANE_TOKEN_KEY) || '').trim();
+}
+
+function setControlPlaneStatus(msg, ok = true) {
+  const el = document.getElementById('control-plane-status');
+  if (!el) return;
+  el.textContent = msg;
+  el.className = `monitor-control-plane-status ${ok ? 'ok' : 'erro'}`;
+}
+
+function syncControlPlaneFields() {
+  const urlInput = document.getElementById('control-plane-url');
+  const tokenInput = document.getElementById('control-plane-token');
+  if (urlInput) {
+    urlInput.value = String(localStorage.getItem(CONTROL_PLANE_URL_KEY) || '').trim();
+  }
+  if (tokenInput) {
+    tokenInput.value = getConfiguredControlPlaneToken();
+  }
+}
+
+function saveControlPlaneConfig() {
+  const urlInput = document.getElementById('control-plane-url');
+  const tokenInput = document.getElementById('control-plane-token');
+  const rawUrl = String(urlInput?.value || '').trim();
+  const rawToken = String(tokenInput?.value || '').trim();
+
+  if (rawUrl) {
+    localStorage.setItem(CONTROL_PLANE_URL_KEY, rawUrl.replace(/\/$/, ''));
+  } else {
+    localStorage.removeItem(CONTROL_PLANE_URL_KEY);
+  }
+
+  if (rawToken) {
+    localStorage.setItem(CONTROL_PLANE_TOKEN_KEY, rawToken);
+  } else {
+    localStorage.removeItem(CONTROL_PLANE_TOKEN_KEY);
+  }
+
+  syncControlPlaneFields();
+  setControlPlaneStatus(`Control plane configurado em ${getControlPlaneBaseUrl()}.`, true);
+}
+
+function clearControlPlaneConfig() {
+  localStorage.removeItem(CONTROL_PLANE_URL_KEY);
+  localStorage.removeItem(CONTROL_PLANE_TOKEN_KEY);
+  syncControlPlaneFields();
+  setControlPlaneStatus(`Configuração limpa. Usando ${getControlPlaneBaseUrl()}.`, true);
+}
+
+async function testControlPlaneConnection() {
+  setControlPlaneStatus('Testando conexão com o control plane...', true);
+
+  try {
+    const res = await fetch(`${getControlPlaneBaseUrl()}/api/control/health`, {
+      method: 'GET',
+      headers: getControlPlaneHeaders(),
+      cache: 'no-store'
+    });
+
+    const payload = await res.json().catch(() => ({}));
+    if (!res.ok || !payload.ok) {
+      throw new Error(payload.message || `HTTP ${res.status}`);
+    }
+
+    const tokenInfo = payload.tokenRequired ? 'token exigido' : 'sem token';
+    setControlPlaneStatus(`Conexão OK com ${getControlPlaneBaseUrl()} (${tokenInfo}).`, true);
+  } catch (err) {
+    setControlPlaneStatus(`Falha ao conectar em ${getControlPlaneBaseUrl()}: ${err.message}`, false);
+  }
+}
 
 function aplicarTema(tema) {
   const isLight = tema === 'light';
@@ -223,17 +317,19 @@ async function executarAcaoMonitor(action) {
   setAcaoResultado('Executando ação...', true);
 
   try {
-    const res = await fetch('/api/monitor/action', {
+    const controlPlaneUrl = `${getControlPlaneBaseUrl()}/api/control/action`;
+    const res = await fetch(controlPlaneUrl, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: getControlPlaneHeaders(),
       body: JSON.stringify({ action: actionName })
     });
 
-    const payload = await res.json();
-    setAcaoResultado(payload.message || 'Ação executada.', Boolean(payload.ok));
+    const payload = await res.json().catch(() => ({}));
+    const ok = Boolean(res.ok && payload.ok);
+    setAcaoResultado(payload.message || (ok ? 'Ação executada.' : 'Falha ao executar ação.'), ok);
     await carregarMonitor();
   } catch (err) {
-    setAcaoResultado(`Falha na ação: ${err.message}`, false);
+    setAcaoResultado(`Falha na ação via control plane (${getControlPlaneBaseUrl()}): ${err.message}`, false);
   }
 }
 
@@ -249,9 +345,24 @@ function configurarAcoes() {
   });
 }
 
+function configurarControlPlane() {
+  syncControlPlaneFields();
+  setControlPlaneStatus(`Usando ${getControlPlaneBaseUrl()}.`, true);
+
+  const saveBtn = document.getElementById('btn-save-control-plane');
+  if (saveBtn) saveBtn.addEventListener('click', saveControlPlaneConfig);
+
+  const testBtn = document.getElementById('btn-test-control-plane');
+  if (testBtn) testBtn.addEventListener('click', testControlPlaneConnection);
+
+  const clearBtn = document.getElementById('btn-clear-control-plane');
+  if (clearBtn) clearBtn.addEventListener('click', clearControlPlaneConfig);
+}
+
 function iniciar() {
   inicializarTema();
   atualizarHora();
+  configurarControlPlane();
   carregarMonitor();
   configurarAcoes();
 

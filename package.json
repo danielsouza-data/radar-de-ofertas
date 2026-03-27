@@ -7,10 +7,12 @@
     "start": "node disparo-completo.js",
     "dev": "nodemon disparo-completo.js",
     "test": "node --test src/**/*.test.js",
+    "security:audit": "node scripts/security-audit.js",
     "send:prod": "node disparo-completo.js",
     "send:scheduled": "node agendador-envios.js",
     "send:test:1": "powershell -NoProfile -Command \"$env:OFFER_LIMIT='1'; node disparo-completo.js\"",
-    "dashboard": "node bin/dashboard-server.js"
+    "dashboard": "node bin/dashboard-server.js",
+    "control:plane": "node bin/control-plane-server.js"
   },
   "keywords": [
     "shopee",
