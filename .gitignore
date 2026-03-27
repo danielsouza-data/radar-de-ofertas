@@ -1,19 +1,54 @@
+# 🔒 SEGURANÇA - Arquivos com credenciais
+.env
+.env.local
+.env.*.local
+.env.production
+.env.staging
+
+# 🔐 Sessões e cache autenticado
+.wwebjs_cache/
+.wwebjs_sessions/
+.credentials
+*.session
+session.json
+auth-token.json
+qr-code.txt
+
+# 📦 Dependências locais
 node_modules/
 node-portable/
 node_local/
-node-local/
-.env
-.env.local
+
+# 📊 Dados runtime e logs
 logs/
-.wwebjs_cache/
-.wwebjs_sessions/
-session.json
-qr-code.txt
 data/
+*.log
+
+# 📁 Arquivos gerados
 historico-ofertas.json
 src/historico-ofertas.json
-*.log
-.DS_Store
 dist/
 build/
 radar-de-ofertas/
+
+# 🖥️ IDE e SO
+.DS_Store
+.vscode/settings.json
+.vscode/launch.json
+.idea/
+*.swp
+*.swo
+*~
+
+# 🧪 Testes
+coverage/
+.nyc_output/
+
+# 🐳 Docker (se usado)
+docker-compose.override.yml
+.dockerignore
+
+# 🔧 Configuração local
+.env.local
+local.config.js
+local-settings.json
