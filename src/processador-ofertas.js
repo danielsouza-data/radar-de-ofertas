@@ -24,6 +24,7 @@ const OFERTAS_CURADAS = require('./ofertas-curadas.js');
 
 // Importar API Shopee Affiliate (com autenticação corrigida)
 const ShopeeAffiliateAPI = require('./shopee-api-real.js');
+const { carregarLinksMercadoLivreArquivo, deduplicarLinks, ehLinkMercadoLivreCurto, calcularCiclosPorJanela } = require('./utils-link');
 
 console.log('='.repeat(70));
 console.log('  🎯 RADAR DE OFERTAS - SISTEMA COMPLETO');
@@ -77,7 +78,6 @@ if (ML_LINKBUILDER_LINKS_ENV.length > 0) {
 }
 
 const FILE_HISTORICO = path.join(__dirname, 'historico-ofertas.json');
-const FILE_ENVIADAS = path.join(__dirname, 'ofertas-enviadas.json');
 
 // ============ FUNÇÕES AUXILIARES ============
 
@@ -98,20 +98,6 @@ function salvarHistorico(historico) {
   fs.writeFileSync(FILE_HISTORICO, JSON.stringify(historico, null, 2));
 }
 
-function carregarLinksMercadoLivreArquivo(filePath) {
-  if (!filePath || !fs.existsSync(filePath)) return [];
-
-  try {
-    return fs
-      .readFileSync(filePath, 'utf8')
-      .split(/\r?\n/)
-      .map((l) => l.trim())
-      .filter((l) => l && !l.startsWith('#'));
-  } catch {
-    return [];
-  }
-}
-
 function normalizarUrlMercadoLivre(raw = '') {
   if (!raw) return '';
   try {
@@ -121,21 +107,6 @@ function normalizarUrlMercadoLivre(raw = '') {
     return u.toString();
   } catch {
     return '';
-  }
-}
-
-function deduplicarLinks(links = []) {
-  return [...new Set(links.map((l) => String(l || '').trim()).filter(Boolean))];
-}
-
-function ehLinkMercadoLivreCurto(raw = '') {
-  if (!raw) return false;
-  try {
-    const parsed = new URL(raw);
-    const host = parsed.hostname.toLowerCase();
-    return host === 'meli.la' || host.endsWith('.meli.la');
-  } catch {
-    return false;
   }
 }
 
@@ -290,22 +261,9 @@ function obterLinksMercadoLivreOficiais(quantidadeNecessaria = 0) {
   return selected;
 }
 
-function calcularCiclosPorJanela(inicioHora = ML_JANELA_INICIO_HORA, fimHora = ML_JANELA_FIM_HORA, intervaloMin = ML_INTERVALO_MINUTOS) {
-  const inicio = Math.max(0, Math.min(23, Number(inicioHora)));
-  const fim = Math.max(0, Math.min(23, Number(fimHora)));
-  const intervalo = Math.max(1, Number(intervaloMin));
-
-  const janelaHoras = fim > inicio ? (fim - inicio) : ((24 - inicio) + fim);
-  const janelaMinutos = janelaHoras * 60;
-
-  if (janelaMinutos <= 0) return 0;
-
-  return Math.ceil(janelaMinutos / intervalo);
-}
-
 function avaliarSaudePoolLinks(totalLinks) {
   const total = Math.max(0, Number(totalLinks) || 0);
-  const ciclosDia = calcularCiclosPorJanela();
+  const ciclosDia = calcularCiclosPorJanela(ML_JANELA_INICIO_HORA, ML_JANELA_FIM_HORA, ML_INTERVALO_MINUTOS);
   const linksNecessariosDiaAlternando = Math.ceil(ciclosDia / 2);
 
   return {
@@ -574,7 +532,7 @@ async function buscarShopeeGraphQL(limite = 10) {
     commission_rate: 3.5,
     rating: oferta.rating || 4.5,
     affiliate_link: `https://shopee.com.br/product/${oferta.seller_id}/${oferta.product_id}?mmp_pid=an_${SHOPEE_PARTNER_ID}`,
-    image_url: 'data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22%3E%3/svg%3E'
+    image_url: 'data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22%3E%3C/svg%3E'
   }));
 }
 
@@ -715,7 +673,8 @@ function normalizarOfertas(shopee = [], mercadolivre = [], options = {}) {
       discount: Math.round(((item.original_price - item.price) / item.original_price) * 100),
       rating: item.rating,
       imageUrl: item.image_url || '',
-      link: linkFinal
+      link: linkFinal,
+      commission_rate: null
     });
   });
 
@@ -776,15 +735,42 @@ function intercalarOfertasPorMarketplace(ofertasLista = []) {
   }
 
   const intercaladas = [];
+  let cursorRoundRobin = 0;
   let ultimoMarketplace = '';
 
   while (intercaladas.length < ofertasLista.length) {
-    let proximoMarketplace = ordemMarketplaces.find((marketplace) => {
-      return marketplace !== ultimoMarketplace && (filas.get(marketplace)?.length || 0) > 0;
-    });
+    // Tenta o round-robin primeiro para garantir distribuição justa
+    let tentativas = 0;
+    let proximoMarketplace = null;
 
+    while (tentativas < ordemMarketplaces.length && !proximoMarketplace) {
+      const idx = (cursorRoundRobin + tentativas) % ordemMarketplaces.length;
+      const marketplace = ordemMarketplaces[idx];
+
+      // Prefere um marketplace diferente do último
+      if (marketplace !== ultimoMarketplace && (filas.get(marketplace)?.length || 0) > 0) {
+        proximoMarketplace = marketplace;
+        cursorRoundRobin = (idx + 1) % ordemMarketplaces.length;
+        break;
+      }
+
+      tentativas++;
+    }
+
+    // Fallback: se não encontrou diferente, pega o próximo do round-robin que tiver ofertas
     if (!proximoMarketplace) {
-      proximoMarketplace = ordemMarketplaces.find((marketplace) => (filas.get(marketplace)?.length || 0) > 0);
+      tentativas = 0;
+      while (tentativas < ordemMarketplaces.length) {
+        const idx = cursorRoundRobin % ordemMarketplaces.length;
+        const marketplace = ordemMarketplaces[idx];
+        if ((filas.get(marketplace)?.length || 0) > 0) {
+          proximoMarketplace = marketplace;
+          cursorRoundRobin = (idx + 1) % ordemMarketplaces.length;
+          break;
+        }
+        cursorRoundRobin++;
+        tentativas++;
+      }
     }
 
     if (!proximoMarketplace) {

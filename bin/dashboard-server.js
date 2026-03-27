@@ -10,6 +10,7 @@ const http = require('http');
 const path = require('path');
 const fs = require('fs');
 const { spawn } = require('child_process');
+const { carregarLinksMercadoLivreArquivo, deduplicarLinks, ehLinkMercadoLivreCurto, calcularCiclosPorJanela } = require('../src/utils-link');
 require('dotenv').config();
 
 const app = express();
@@ -18,7 +19,7 @@ const PORT = process.env.DASHBOARD_PORT || 3000;
 
 // Diretórios de dados
 const DISPAROS_LOG = path.join(__dirname, '..', 'data', 'disparos-log.json');
-const HISTORICO_OFERTAS = path.join(__dirname, '..', 'data', 'historico-ofertas.json');
+const HISTORICO_OFERTAS = path.join(__dirname, '..', 'src', 'historico-ofertas.json');
 const WHATSAPP_STATUS = path.join(__dirname, '..', 'data', 'whatsapp-status.json');
 const FALHAS_LOG = path.join(__dirname, '..', 'data', 'disparos-falhas.json');
 const SCHEDULER_STATUS_FILE = path.join(__dirname, '..', 'data', 'scheduler-status.json');
@@ -414,48 +415,6 @@ function obterMonitorRuntime() {
   };
 }
 
-function carregarLinksMercadoLivreArquivo(filePath) {
-  if (!filePath || !fs.existsSync(filePath)) return [];
-
-  try {
-    return fs
-      .readFileSync(filePath, 'utf8')
-      .split(/\r?\n/)
-      .map((l) => l.trim())
-      .filter((l) => l && !l.startsWith('#'));
-  } catch (e) {
-    console.error('[ERR] Erro ao ler pool de links do Mercado Livre:', e.message);
-    return [];
-  }
-}
-
-function deduplicarLinks(links = []) {
-  return [...new Set(links.map((l) => String(l || '').trim()).filter(Boolean))];
-}
-
-function ehLinkMercadoLivreCurto(raw = '') {
-  if (!raw) return false;
-  try {
-    const parsed = new URL(raw);
-    const host = parsed.hostname.toLowerCase();
-    return host === 'meli.la' || host.endsWith('.meli.la');
-  } catch {
-    return false;
-  }
-}
-
-function calcularCiclosPorJanela(inicioHora = ML_JANELA_INICIO_HORA, fimHora = ML_JANELA_FIM_HORA, intervaloMin = ML_INTERVALO_MINUTOS) {
-  const inicio = Math.max(0, Math.min(23, Number(inicioHora)));
-  const fim = Math.max(0, Math.min(23, Number(fimHora)));
-  const intervalo = Math.max(1, Number(intervaloMin));
-
-  const janelaHoras = fim > inicio ? (fim - inicio) : ((24 - inicio) + fim);
-  const janelaMinutos = janelaHoras * 60;
-  if (janelaMinutos <= 0) return 0;
-
-  return Math.ceil(janelaMinutos / intervalo);
-}
-
 function obterStatusPoolMercadoLivre() {
   const linksEnv = String(process.env.MERCADO_LIVRE_LINKBUILDER_LINKS || '')
     .split(/[\n,;]/)
@@ -464,7 +423,7 @@ function obterStatusPoolMercadoLivre() {
   const linksArquivo = carregarLinksMercadoLivreArquivo(ML_LINKBUILDER_LINKS_FILE);
   const linksBrutos = deduplicarLinks([...linksEnv, ...linksArquivo]);
   const links = ML_LINKBUILDER_REQUIRE_SHORT ? linksBrutos.filter(ehLinkMercadoLivreCurto) : linksBrutos;
-  const ciclosDia = calcularCiclosPorJanela();
+  const ciclosDia = calcularCiclosPorJanela(ML_JANELA_INICIO_HORA, ML_JANELA_FIM_HORA, ML_INTERVALO_MINUTOS);
   const linksNecessariosDiaAlternando = Math.ceil(ciclosDia / 2);
 
   return {

@@ -1,6 +1,6 @@
 param(
   [string]$ProjectRoot = ".",
-  [int]$TargetHour = 12,
+  [int]$TargetHour = 17,
   [string]$ReportStartIso = "",
   [string]$EmailTo = ""
 )
@@ -20,14 +20,25 @@ if ($agora -ge $fim) {
   $fim = $agora
 }
 
-Write-Output "[AUTO-12H] Monitor iniciado em $($agora.ToString('yyyy-MM-dd HH:mm:ss'))"
-Write-Output "[AUTO-12H] Acao programada para $($fim.ToString('yyyy-MM-dd HH:mm:ss'))"
+Write-Output "[AUTO-17H] Monitor iniciado em $($agora.ToString('yyyy-MM-dd HH:mm:ss'))"
+Write-Output "[AUTO-17H] Acao programada para $($fim.ToString('yyyy-MM-dd HH:mm:ss'))"
 
 while ((Get-Date) -lt $fim) {
   Start-Sleep -Seconds 10
 }
 
-Write-Output "[AUTO-12H] 12:00 atingido. Encerrando processos de loop/disparo..."
+Write-Output "[AUTO-17H] 17:00 atingido. Enviando mensagem de encerramento no grupo..."
+
+& .\node-portable\node.exe .\scripts\enviar-mensagem-encerramento.js
+$msgExitCode = $LASTEXITCODE
+if ($msgExitCode -eq 0) {
+  Write-Output "[AUTO-17H] Mensagem de encerramento enviada com sucesso."
+}
+else {
+  Write-Output "[AUTO-17H] Aviso: mensagem de encerramento nao foi enviada (exit=$msgExitCode)."
+}
+
+Write-Output "[AUTO-17H] Encerrando processos de loop/disparo..."
 
 $targets = Get-CimInstance Win32_Process |
   Where-Object {
