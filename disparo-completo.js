@@ -5,7 +5,6 @@
  */
 
 const { Client, LocalAuth, MessageMedia } = require('whatsapp-web.js');
-const path = require('path');
 const fs = require('fs');
 const {
   executar: processarOfertas,
@@ -17,6 +16,7 @@ const {
   releaseGlobalLock
 } = require('./src/global-lock');
 const { patchConsole } = require('./src/log-mask');
+const { PATHS, ensureDirectories } = require('./src/config/paths');
 require('dotenv').config();
 patchConsole();
 
@@ -35,14 +35,14 @@ const OFFER_LIMIT = parseEnvInt(process.env.OFFER_LIMIT, 0);
 const MAX_REPROCESS_POR_OFERTA = parseEnvInt(process.env.MAX_REPROCESS_POR_OFERTA, 1);
 const LOCK_STALE_MS = parseEnvInt(process.env.SEND_LOCK_STALE_MS, DEFAULT_STALE_MS);
 const ACK_TIMEOUT_MS = parseEnvInt(process.env.ACK_TIMEOUT_MS, 45000);
-const LOCK_FILE = path.join(__dirname, 'data', 'disparo-global.lock');
-const FAIL_LOG_FILE = path.join(__dirname, 'data', 'disparos-falhas.json');
-const FILA_REPROCESS_FILE = path.join(__dirname, 'data', 'fila-reprocessamento.json');
+const LOCK_FILE = PATHS.GLOBAL_LOCK;
+const FAIL_LOG_FILE = PATHS.DISPAROS_FALHAS;
+const FILA_REPROCESS_FILE = PATHS.FILA_REPROCESSAMENTO;
 const LOCK_OWNER = process.env.SCHEDULED_RUN === '1' ? 'scheduled_disparo' : 'manual_disparo';
 
 // Session ID FIXO - reutiliza mesma autenticação (salva via autenticar-sessao.js)
 const SESSION_ID = 'producao';
-const AUTH_STORE_PATH = path.join(__dirname, '.wwebjs_sessions', SESSION_ID);
+const AUTH_STORE_PATH = PATHS.WWEBJS_SESSIONS.replace(/[\\/]$/, '') + '/' + SESSION_ID;
 
 console.log(`\n[SESSION] ID: ${SESSION_ID} (REUTILIZANDO)`);
 console.log(`[IMPORTANTE] Execute autenticar-sessao.js primeiro!\n`);
@@ -578,7 +578,7 @@ client.on('qr', (qr) => {
   console.log('='.repeat(70) + '\n');
 
   // Salvar como arquivo de texto também
-  fs.writeFileSync(path.join(__dirname, 'qr-code.txt'), qr);
+  fs.writeFileSync(PATHS.QR_CODE_TXT, qr);
   console.log('✅ QR Code salvo em: qr-code.txt\n');
 });
 
@@ -630,6 +630,7 @@ process.on('exit', () => {
   liberarLock();
 });
 
+ensureDirectories();
 console.log('\n[INIT] Inicializando WhatsApp...\n');
 const lockResult = acquireGlobalLock(LOCK_FILE, LOCK_OWNER, LOCK_STALE_MS);
 

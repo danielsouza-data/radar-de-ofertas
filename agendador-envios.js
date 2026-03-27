@@ -11,18 +11,18 @@
 
 const cron = require('node-cron');
 const { spawn } = require('child_process');
-const path = require('path');
 const fs = require('fs');
 const {
   DEFAULT_STALE_MS,
   readLock,
   isLockActive
 } = require('./src/global-lock');
+const { PATHS, ensureDirectories } = require('./src/config/paths');
 
 const TIMEZONE = process.env.SCHED_TZ || 'America/Sao_Paulo';
-const DISPARO_SCRIPT = path.join(__dirname, 'disparo-completo.js');
-const STATUS_FILE = path.join(__dirname, 'data', 'scheduler-status.json');
-const LOCK_FILE = path.join(__dirname, 'data', 'disparo-global.lock');
+const DISPARO_SCRIPT = PATHS.DISPARO_COMPLETO;
+const STATUS_FILE = PATHS.SCHEDULER_STATUS;
+const LOCK_FILE = PATHS.GLOBAL_LOCK;
 const LOCK_STALE_MS = Number(process.env.SEND_LOCK_STALE_MS || DEFAULT_STALE_MS);
 
 const CRON_REGULAR = '*/5 9-21 * * *';
@@ -108,6 +108,7 @@ function executarDisparo(trigger) {
 }
 
 function iniciarAgendamentos() {
+  ensureDirectories();
   log('Agendador iniciado.');
   log(`Janela ativa: 09:00-22:00 (${TIMEZONE}), frequencia de 5 em 5 minutos.`);
   log(`Cron regular: ${CRON_REGULAR}`);

@@ -41,7 +41,7 @@ console.log(`  🌐 Acesso: http://localhost:${PORT}`);
 console.log('='.repeat(70) + '\n');
 
 // Middleware
-app.use(express.static(path.join(__dirname, '..', 'public')));
+app.use(express.static(PATHS.PUBLIC));
 app.use(express.json());
 
 // Função auxiliar para ler dados
@@ -165,7 +165,7 @@ function encerrarPid(pid) {
 function iniciarProcessoDetached(scriptPath, extraEnv = {}) {
   try {
     const child = spawn(process.execPath, [scriptPath], {
-      cwd: path.resolve(__dirname, '..'),
+      cwd: PATHS.ROOT,
       detached: true,
       stdio: 'ignore',
       env: {
@@ -648,7 +648,7 @@ app.get('/api/healthcheck', (req, res) => {
 
 // Rota principal
 app.get('/', (req, res) => {
-  res.sendFile(path.join(__dirname, '..', 'public', 'dashboard.html'));
+  res.sendFile(PATHS.DASHBOARD_HTML);
 });
 
 // Iniciar servidor
