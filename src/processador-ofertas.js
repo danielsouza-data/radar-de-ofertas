@@ -653,7 +653,11 @@ function normalizarOfertas(shopee = [], mercadolivre = [], options = {}) {
   // Normalizar Mercado Livre
   mercadolivre.forEach((item, idx) => {
     const linkOficialMapeado = obterLinkCurtoMercadoLivreMapeado(item);
-    const linkOficial = linkOficialMapeado || (linksOficiaisMl.length > 0 ? '' : '');
+    const linkOficialPool = linksOficiaisMl.length > 0
+      ? linksOficiaisMl[idx % linksOficiaisMl.length]
+      : '';
+    // Prioridade: mapeado por produto > pool rotativo > fallback
+    const linkOficial = linkOficialMapeado || linkOficialPool;
     const linkFallback = gerarLinkMercadoLivre(item.product_id, item.slug, item.raw_link);
     const linkFinal = linkOficial || ((requireShortMl && strictMlMatch) ? '' : linkFallback);
 
