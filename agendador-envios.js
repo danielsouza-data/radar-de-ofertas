@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * AGENDADOR OFICIAL DE ENVIOS
- * Janela: 09:00 ate 22:00 (America/Sao_Paulo)
+ * Janela: 09:00 ate 17:00 (America/Sao_Paulo)
  * Frequencia: a cada 5 minutos
  *
  * Observacao:
@@ -24,9 +24,11 @@ const DISPARO_SCRIPT = PATHS.DISPARO_COMPLETO;
 const STATUS_FILE = PATHS.SCHEDULER_STATUS;
 const LOCK_FILE = PATHS.GLOBAL_LOCK;
 const LOCK_STALE_MS = Number(process.env.SEND_LOCK_STALE_MS || DEFAULT_STALE_MS);
+const START_HOUR = Math.max(0, Math.min(23, Number(process.env.SCHEDULE_START_HOUR || 9)));
+const END_HOUR = Math.max(0, Math.min(23, Number(process.env.SCHEDULE_END_HOUR || 17)));
+const LAST_DISPATCH_HOUR = Math.max(START_HOUR, END_HOUR - 1);
 
-const CRON_REGULAR = '*/5 9-21 * * *';
-const CRON_2200 = '0 22 * * *';
+const CRON_REGULAR = `*/5 ${START_HOUR}-${LAST_DISPATCH_HOUR} * * *`;
 
 let isRunning = false;
 let currentChild = null;
@@ -41,10 +43,11 @@ function salvarStatus(extra = {}) {
     pid: process.pid,
     timezone: TIMEZONE,
     cronRegular: CRON_REGULAR,
-    cron2200: CRON_2200,
+    operatingWindow: `${String(START_HOUR).padStart(2, '0')}:00-${String(END_HOUR).padStart(2, '0')}:00`,
     updatedAt: Date.now(),
     updatedAtISO: new Date().toISOString(),
-    isRunning,
+    isRunning: true,
+    dispatchInProgress: isRunning,
     ...extra
   };
 
@@ -110,9 +113,8 @@ function executarDisparo(trigger) {
 function iniciarAgendamentos() {
   ensureDirectories();
   log('Agendador iniciado.');
-  log(`Janela ativa: 09:00-22:00 (${TIMEZONE}), frequencia de 5 em 5 minutos.`);
+  log(`Janela ativa: ${String(START_HOUR).padStart(2, '0')}:00-${String(END_HOUR).padStart(2, '0')}:00 (${TIMEZONE}), frequencia de 5 em 5 minutos.`);
   log(`Cron regular: ${CRON_REGULAR}`);
-  log(`Cron 22:00: ${CRON_2200}`);
 
   salvarStatus({ startedAt: Date.now(), detail: 'Agendador iniciado com sucesso' });
 
@@ -121,17 +123,11 @@ function iniciarAgendamentos() {
     () => executarDisparo('regular_5min'),
     { timezone: TIMEZONE }
   );
-
-  cron.schedule(
-    CRON_2200,
-    () => executarDisparo('closing_2200'),
-    { timezone: TIMEZONE }
-  );
 }
 
 process.on('SIGINT', () => {
   log('Recebido SIGINT. Encerrando agendador...');
-  salvarStatus({ scheduler: 'stopped', detail: 'Encerrado por SIGINT', stoppedAt: Date.now() });
+  salvarStatus({ scheduler: 'stopped', isRunning: false, dispatchInProgress: false, detail: 'Encerrado por SIGINT', stoppedAt: Date.now() });
 
   if (currentChild && !currentChild.killed) {
     currentChild.kill('SIGINT');
@@ -142,7 +138,7 @@ process.on('SIGINT', () => {
 
 process.on('SIGTERM', () => {
   log('Recebido SIGTERM. Encerrando agendador...');
-  salvarStatus({ scheduler: 'stopped', detail: 'Encerrado por SIGTERM', stoppedAt: Date.now() });
+  salvarStatus({ scheduler: 'stopped', isRunning: false, dispatchInProgress: false, detail: 'Encerrado por SIGTERM', stoppedAt: Date.now() });
 
   if (currentChild && !currentChild.killed) {
     currentChild.kill('SIGTERM');

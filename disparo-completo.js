@@ -31,7 +31,19 @@ function parseEnvInt(val, defaultVal) {
   return (Number.isFinite(n) && n >= 0) ? n : defaultVal;
 }
 
+function parseEnvBool(val, defaultVal = false) {
+  if (val === undefined || val === null || val === '') return defaultVal;
+  return ['1', 'true', 'yes', 'sim', 'on'].includes(String(val).trim().toLowerCase());
+}
+
 const CHANNEL_ID = process.env.WHATSAPP_CHANNEL_ID;
+const CHANNEL_NAME = String(process.env.WHATSAPP_CHANNEL_NAME || '').trim();
+const ENVIRONMENT = String(process.env.ENVIRONMENT || '').trim().toLowerCase();
+const PROD_CHANNEL_ID = String(process.env.WHATSAPP_PROD_CHANNEL_ID || '').trim();
+const TEST_CHANNEL_ID = String(process.env.WHATSAPP_TEST_CHANNEL_ID || '').trim();
+const TEST_CHANNEL_NAME = String(process.env.WHATSAPP_TEST_CHANNEL_NAME || '').trim();
+const RADAR_TEST_MODE = parseEnvBool(process.env.RADAR_TEST_MODE, false);
+const RADAR_DRY_RUN = parseEnvBool(process.env.RADAR_DRY_RUN, false);
 const INTERVALO_MS = parseEnvInt(process.env.INTERVALO_MS, 300000); // 5 minutos entre ofertas
 const OFFER_LIMIT = parseEnvInt(process.env.OFFER_LIMIT, 0);
 const MAX_REPROCESS_POR_OFERTA = parseEnvInt(process.env.MAX_REPROCESS_POR_OFERTA, 1);
@@ -39,10 +51,29 @@ const LOCK_STALE_MS = parseEnvInt(process.env.SEND_LOCK_STALE_MS, DEFAULT_STALE_
 const ACK_TIMEOUT_MS = parseEnvInt(process.env.ACK_TIMEOUT_MS, 45000);
 const ANTI_REPETICAO_JANELA_HORAS = parseEnvInt(process.env.ANTI_REPETICAO_JANELA_HORAS, 24);
 const ML_REFRESH_PRICE_BEFORE_SEND = String(process.env.ML_REFRESH_PRICE_BEFORE_SEND || 'true').toLowerCase() !== 'false';
+const PRIORITY_MARKETPLACE_RAW = String(process.env.RADAR_PRIORITY_MARKETPLACE || '').trim().toLowerCase();
 const LOCK_FILE = PATHS.GLOBAL_LOCK;
 const FAIL_LOG_FILE = PATHS.DISPAROS_FALHAS;
 const FILA_REPROCESS_FILE = PATHS.FILA_REPROCESSAMENTO;
 const LOCK_OWNER = process.env.SCHEDULED_RUN === '1' ? 'scheduled_disparo' : 'manual_disparo';
+
+const isTestContext =
+  RADAR_TEST_MODE ||
+  (TEST_CHANNEL_ID && CHANNEL_ID === TEST_CHANNEL_ID) ||
+  (TEST_CHANNEL_NAME && CHANNEL_NAME && CHANNEL_NAME === TEST_CHANNEL_NAME) ||
+  (CHANNEL_NAME && /\bteste\b/i.test(CHANNEL_NAME));
+
+if (RADAR_TEST_MODE && (!TEST_CHANNEL_ID || !PROD_CHANNEL_ID)) {
+  console.error('[SAFETY_BLOCK] RADAR_TEST_MODE exige WHATSAPP_TEST_CHANNEL_ID e WHATSAPP_PROD_CHANNEL_ID configurados.');
+  process.exit(1);
+}
+
+if (isTestContext && PROD_CHANNEL_ID && CHANNEL_ID === PROD_CHANNEL_ID) {
+  console.error('[SAFETY_BLOCK] Envio bloqueado: contexto de teste/homologacao detectado apontando para grupo de producao.');
+  console.error(`[SAFETY_BLOCK] CHANNEL_NAME=${CHANNEL_NAME || 'n/a'} | CHANNEL_ID=${CHANNEL_ID || 'n/a'}`);
+  console.error('[SAFETY_BLOCK] Ajuste WHATSAPP_CHANNEL_ID para WHATSAPP_TEST_CHANNEL_ID ou desative RADAR_TEST_MODE conscientemente.');
+  process.exit(1);
+}
 
 // Session ID FIXO - reutiliza mesma autenticação (salva via autenticar-sessao.js)
 const SESSION_ID = 'producao';
@@ -281,9 +312,11 @@ function registrarDisparo(oferta, numero, total, metaEnvio = {}) {
       numero,
       total,
       produto: oferta.product_name,
+      productId: oferta.product_id || null,
       preco: oferta.price,
       marketplace: oferta.marketplace,
       link: oferta.link,
+      sourceLink: oferta.source_link || oferta.raw_link || null,
       desconto: oferta.discount,
       comissaoPercentual: Number.isFinite(Number(oferta.commission_rate))
         ? Number(oferta.commission_rate)
@@ -363,6 +396,18 @@ function ehMarketplaceMercadoLivre(marketplace) {
 
 function ehMarketplaceShopee(marketplace) {
   return normalizarTexto(marketplace).includes('shopee');
+}
+
+function obterMarketplacePrioritario() {
+  if (PRIORITY_MARKETPLACE_RAW === 'ml' || PRIORITY_MARKETPLACE_RAW === 'mercado livre' || PRIORITY_MARKETPLACE_RAW === 'mercadolivre') {
+    return 'Mercado Livre';
+  }
+
+  if (PRIORITY_MARKETPLACE_RAW === 'shopee') {
+    return 'Shopee';
+  }
+
+  return '';
 }
 
 function normalizarNumeroPreco(valor) {
@@ -490,7 +535,7 @@ async function sincronizarPrecoMercadoLivre(oferta) {
 function carregarHistoricoDisparos() {
   try {
     if (!fs.existsSync(LOG_DISPAROS)) {
-      return { seenLinks: new Set(), seenProdutos: new Set() };
+      return { seenLinks: new Set(), seenProdutos: new Set(), seenProdutoIds: new Set(), seenSourceLinks: new Set() };
     }
 
     const conteudo = fs.readFileSync(LOG_DISPAROS, 'utf8');
@@ -501,37 +546,50 @@ function carregarHistoricoDisparos() {
 
     const seenLinks = new Set();
     const seenProdutos = new Set();
+    const seenProdutoIds = new Set();
+    const seenSourceLinks = new Set();
 
     disparos.forEach((d) => {
       const ts = Number(d?.timestamp) || 0;
       if (ts < limiteTimestamp) return;
 
       const link = normalizarTexto(d?.link);
+      const sourceLink = normalizarTexto(d?.sourceLink);
       const marketplace = normalizarTexto(d?.marketplace);
       const produto = normalizarTexto(d?.produto);
+      const productId = normalizarTexto(d?.productId);
 
       if (link) seenLinks.add(link);
+      if (sourceLink) seenSourceLinks.add(sourceLink);
       if (marketplace && produto) seenProdutos.add(`${marketplace}|${produto}`);
+      if (marketplace && productId) seenProdutoIds.add(`${marketplace}|${productId}`);
     });
 
-    return { seenLinks, seenProdutos };
+    return { seenLinks, seenProdutos, seenProdutoIds, seenSourceLinks };
   } catch (err) {
     console.error('[LOG_READ_ERR]', err.message);
-    return { seenLinks: new Set(), seenProdutos: new Set() };
+    return { seenLinks: new Set(), seenProdutos: new Set(), seenProdutoIds: new Set(), seenSourceLinks: new Set() };
   }
 }
 
 function filtrarOfertasNaoEnviadas(ofertasLista) {
-  const { seenLinks, seenProdutos } = carregarHistoricoDisparos();
+  const { seenLinks, seenProdutos, seenProdutoIds, seenSourceLinks } = carregarHistoricoDisparos();
 
   const filtradas = ofertasLista.filter((oferta) => {
     const ofertaLink = normalizarTexto(oferta?.link);
+    const ofertaSourceLink = normalizarTexto(oferta?.source_link || oferta?.raw_link);
     const ofertaMarketplace = normalizarTexto(oferta?.marketplace);
     const ofertaProduto = normalizarTexto(oferta?.product_name);
+    const ofertaProductId = normalizarTexto(oferta?.product_id);
     const produtoKey = `${ofertaMarketplace}|${ofertaProduto}`;
+    const produtoIdKey = `${ofertaMarketplace}|${ofertaProductId}`;
 
     if (ofertaLink && seenLinks.has(ofertaLink)) return false;
+    if (ofertaSourceLink && seenSourceLinks.has(ofertaSourceLink)) return false;
     if (ofertaMarketplace && ofertaProduto && seenProdutos.has(produtoKey)) {
+      return false;
+    }
+    if (ofertaMarketplace && ofertaProductId && seenProdutoIds.has(produtoIdKey)) {
       return false;
     }
 
@@ -567,10 +625,17 @@ function filtrarOfertasNaoEnviadas(ofertasLista) {
   if (filaShopee.length > 0 && filaMercadoLivre.length > 0) {
     const alternadas = [];
     const maxLen = Math.max(filaShopee.length, filaMercadoLivre.length);
+    const marketplacePrioritario = obterMarketplacePrioritario();
+    const iniciarComMl = marketplacePrioritario === 'Mercado Livre';
 
     for (let i = 0; i < maxLen; i++) {
-      if (filaShopee[i]) alternadas.push(filaShopee[i]);
-      if (filaMercadoLivre[i]) alternadas.push(filaMercadoLivre[i]);
+      if (iniciarComMl) {
+        if (filaMercadoLivre[i]) alternadas.push(filaMercadoLivre[i]);
+        if (filaShopee[i]) alternadas.push(filaShopee[i]);
+      } else {
+        if (filaShopee[i]) alternadas.push(filaShopee[i]);
+        if (filaMercadoLivre[i]) alternadas.push(filaMercadoLivre[i]);
+      }
     }
 
     if (filaOutros.length > 0) {
@@ -664,6 +729,20 @@ async function enviarProxima() {
 
     const msg = formatarMensagem(oferta, numero, ofertas.length);
     console.log(msg);
+    if (RADAR_DRY_RUN) {
+      console.log('\n[DRY_RUN] Envio real ignorado (nenhuma mensagem foi enviada ao WhatsApp).');
+      enviadas++;
+      index++;
+
+      if (index < ofertas.length) {
+        console.log(`[WAIT] ⏳ Aguardando ${INTERVALO_MS / 1000}s para próxima...`);
+        setTimeout(enviarProxima, INTERVALO_MS);
+      } else {
+        enviarProxima();
+      }
+      return;
+    }
+
     console.log('\n[STATUS] Transmitindo...');
 
     const metaEnvio = await enviarComRecuperacao(CHANNEL_ID, msg, media);
@@ -800,6 +879,7 @@ client.on('change_state', (state) => {
 process.on('SIGINT', () => {
   console.log('\n[SIGINT] Encerrando gracefully...');
   atualizarStatusWhatsapp('stopped', { detail: 'Processo encerrado por SIGINT' });
+  salvarFilaReprocessamento();
   liberarLock();
   client.destroy().catch(() => {});
   process.exit(0);
@@ -808,12 +888,14 @@ process.on('SIGINT', () => {
 process.on('SIGTERM', () => {
   console.log('\n[SIGTERM] Encerrando gracefully...');
   atualizarStatusWhatsapp('stopped', { detail: 'Processo encerrado por SIGTERM' });
+  salvarFilaReprocessamento();
   liberarLock();
   client.destroy().catch(() => {});
   process.exit(0);
 });
 
 process.on('exit', () => {
+  salvarFilaReprocessamento();
   liberarLock();
 });
 

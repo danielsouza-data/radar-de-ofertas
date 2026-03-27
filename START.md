@@ -63,7 +63,7 @@ Regra do agendamento:
 
 - a cada 5 minutos
 - todos os dias
-- das 09:00 ate 22:00 (America/Sao_Paulo)
+- das 09:00 ate 17:00 (America/Sao_Paulo)
 
 Producao:
 
@@ -98,4 +98,4 @@ Verifique:
 - alternancia de envio ajustada para Shopee/ML em loop 1x1 quando ambos marketplaces estao disponiveis
 - filtro anti-repeticao revisado para evitar supressao excessiva de ofertas do Mercado Livre
 - em caso de travamento, limpe `data/disparo-global.lock` antes de reiniciar o agendador
-- monitor de encerramento diario permanece em 17:00 via `scripts/encerrar-12h-e-relatorio.ps1`
+- monitor de encerramento diario permanece em 17:00 via `scripts/encerrar-12h-e-relatorio.ps1` e volta o `.env` para o grupo de testes ao final

@@ -98,7 +98,7 @@ echo ========================================
 echo  Modo Agendado
 echo ========================================
 echo.
-echo Janela: 09:00 ate 22:00 (todos os dias)
+echo Janela: 09:00 ate 17:00 (todos os dias)
 echo Frequencia: a cada 5 minutos
 echo.
 echo Pressione CTRL+C para encerrar o agendador.

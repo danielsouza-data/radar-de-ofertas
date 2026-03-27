@@ -329,6 +329,7 @@ function obterMonitorRuntime() {
         status: schedulerRaw?.scheduler || 'unknown',
         pid: Number(schedulerRaw?.pid || 0) || null,
         isRunning: Boolean(schedulerRaw?.isRunning),
+        dispatchInProgress: Boolean(schedulerRaw?.dispatchInProgress),
         timezone: schedulerRaw?.timezone || 'America/Sao_Paulo',
         cronRegular: schedulerRaw?.cronRegular || null,
         cron2200: schedulerRaw?.cron2200 || null,

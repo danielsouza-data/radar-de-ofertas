@@ -63,6 +63,10 @@ const ML_JANELA_FIM_HORA = Math.max(0, Math.min(23, Number(process.env.ML_JANELA
 const ML_INTERVALO_MINUTOS = Math.max(1, Number(process.env.ML_INTERVALO_MINUTOS || 5));
 const CURADORIA_MIN_RATING = Math.max(0, Number(process.env.CURADORIA_MIN_RATING || 0.1));
 const CURADORIA_MIN_SALES = Math.max(0, Number(process.env.CURADORIA_MIN_SALES || 1));
+const PRIORITY_MARKETPLACE_RAW = String(process.env.RADAR_PRIORITY_MARKETPLACE || '').trim().toLowerCase();
+const PRIORITY_MARKETPLACE = PRIORITY_MARKETPLACE_RAW === 'ml' || PRIORITY_MARKETPLACE_RAW === 'mercado livre' || PRIORITY_MARKETPLACE_RAW === 'mercadolivre'
+  ? 'Mercado Livre'
+  : (PRIORITY_MARKETPLACE_RAW === 'shopee' ? 'Shopee' : '');
 
 const MERCADO_LIVRE_HEADERS = {
   'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
@@ -158,6 +162,13 @@ function obterLinkCurtoMercadoLivreMapeado(item = {}) {
   }
 
   return '';
+}
+
+function obterProductIdMercadoLivreDaUrl(raw = '') {
+  if (!raw) return '';
+
+  const match = String(raw).match(/\/p\/(MLB\w+)/i);
+  return match ? String(match[1] || '').toUpperCase() : '';
 }
 
 function carregarEstadoPoolLinks(filePath) {
@@ -713,7 +724,8 @@ function normalizarOfertas(shopee = [], mercadolivre = [], options = {}) {
   // Normalizar Mercado Livre
   mercadolivre.forEach((item) => {
     const linkOficialMapeado = obterLinkCurtoMercadoLivreMapeado(item);
-    const linkCurtoPool = ehLinkMercadoLivreCurto(linksOficiaisMl[cursorLinkCurtoPool] || '')
+    const poolFallbackPermitido = !strictMlMatch;
+    const linkCurtoPool = poolFallbackPermitido && ehLinkMercadoLivreCurto(linksOficiaisMl[cursorLinkCurtoPool] || '')
       ? linksOficiaisMl[cursorLinkCurtoPool]
       : '';
     if (linkCurtoPool) {
@@ -726,11 +738,18 @@ function normalizarOfertas(shopee = [], mercadolivre = [], options = {}) {
     const linkFallback = gerarLinkMercadoLivre(item.product_id, item.slug, item.raw_link);
     const linkFinal = linkOficial || linkCurtoPool || ((requireShortMl || strictMlMatch) ? '' : linkFallback);
     const sourceLink = normalizarUrlMercadoLivre(item.raw_link || `https://www.mercadolivre.com.br/${item.slug || 'produto'}/p/${item.product_id}`);
+    const productIdMapeado = obterProductIdMercadoLivreDaUrl(sourceLink);
+    const productIdItem = String(item.product_id || '').toUpperCase();
 
     if (!linkFinal) {
       if (requireShortMl || strictMlMatch) {
-        console.warn(`[ML] Produto sem link curto mapeado no Link Builder: ${item.product_name} (id=${item.product_id})`);
+        console.warn(`[ML] Produto sem link curto mapeado de forma exata no Link Builder: ${item.product_name} (id=${item.product_id})`);
       }
+      return;
+    }
+
+    if (strictMlMatch && productIdMapeado && productIdItem && productIdMapeado !== productIdItem) {
+      console.warn(`[ML] Produto descartado por divergencia entre item e source_link: ${item.product_name} (item=${productIdItem}, source=${productIdMapeado})`);
       return;
     }
 
@@ -789,6 +808,25 @@ function rankearOfertas(ofertas) {
     .sort((a, b) => b.score - a.score);
 }
 
+function priorizarMarketplaceNaOrdem(ordem = []) {
+  if (!PRIORITY_MARKETPLACE || !Array.isArray(ordem) || ordem.length <= 1) {
+    return Array.isArray(ordem) ? [...ordem] : [];
+  }
+
+  const prioridade = [];
+  const restantes = [];
+
+  ordem.forEach((marketplace) => {
+    if (marketplace === PRIORITY_MARKETPLACE) {
+      prioridade.push(marketplace);
+      return;
+    }
+    restantes.push(marketplace);
+  });
+
+  return [...prioridade, ...restantes];
+}
+
 function intercalarOfertasPorMarketplace(ofertasLista = []) {
   if (!Array.isArray(ofertasLista) || ofertasLista.length <= 1) {
     return Array.isArray(ofertasLista) ? [...ofertasLista] : [];
@@ -806,7 +844,9 @@ function intercalarOfertasPorMarketplace(ofertasLista = []) {
     filas.get(marketplace).push(oferta);
   });
 
-  if (ordemMarketplaces.length <= 1) {
+  const ordemMarketplacesPriorizada = priorizarMarketplaceNaOrdem(ordemMarketplaces);
+
+  if (ordemMarketplacesPriorizada.length <= 1) {
     return [...ofertasLista];
   }
 
@@ -819,9 +859,9 @@ function intercalarOfertasPorMarketplace(ofertasLista = []) {
     let tentativas = 0;
     let proximoMarketplace = null;
 
-    while (tentativas < ordemMarketplaces.length && !proximoMarketplace) {
-      const idx = (cursorRoundRobin + tentativas) % ordemMarketplaces.length;
-      const marketplace = ordemMarketplaces[idx];
+    while (tentativas < ordemMarketplacesPriorizada.length && !proximoMarketplace) {
+      const idx = (cursorRoundRobin + tentativas) % ordemMarketplacesPriorizada.length;
+      const marketplace = ordemMarketplacesPriorizada[idx];
 
       // Prefere um marketplace diferente do último
       if (marketplace !== ultimoMarketplace && (filas.get(marketplace)?.length || 0) > 0) {
@@ -836,12 +876,12 @@ function intercalarOfertasPorMarketplace(ofertasLista = []) {
     // Fallback: se não encontrou diferente, pega o próximo do round-robin que tiver ofertas
     if (!proximoMarketplace) {
       tentativas = 0;
-      while (tentativas < ordemMarketplaces.length) {
-        const idx = cursorRoundRobin % ordemMarketplaces.length;
-        const marketplace = ordemMarketplaces[idx];
+      while (tentativas < ordemMarketplacesPriorizada.length) {
+        const idx = cursorRoundRobin % ordemMarketplacesPriorizada.length;
+        const marketplace = ordemMarketplacesPriorizada[idx];
         if ((filas.get(marketplace)?.length || 0) > 0) {
           proximoMarketplace = marketplace;
-          cursorRoundRobin = (idx + 1) % ordemMarketplaces.length;
+          cursorRoundRobin = (idx + 1) % ordemMarketplacesPriorizada.length;
           break;
         }
         cursorRoundRobin++;
@@ -876,24 +916,26 @@ function selecionarOfertasBalanceadas(ofertasRankeadas, totalDesejado = 6) {
     .filter((m) => porMarketplace.get(m).length > 0)
     .sort((a, b) => (porMarketplace.get(b)[0]?.score || 0) - (porMarketplace.get(a)[0]?.score || 0));
 
-  if (marketplaces.length <= 1) {
+  const marketplacesPriorizados = priorizarMarketplaceNaOrdem(marketplaces);
+
+  if (marketplacesPriorizados.length <= 1) {
     return ofertasRankeadas.slice(0, total);
   }
 
-  const quotaBase = Math.floor(total / marketplaces.length);
-  let resto = total - (quotaBase * marketplaces.length);
-  const quotas = new Map(marketplaces.map((m) => [m, quotaBase]));
+  const quotaBase = Math.floor(total / marketplacesPriorizados.length);
+  let resto = total - (quotaBase * marketplacesPriorizados.length);
+  const quotas = new Map(marketplacesPriorizados.map((m) => [m, quotaBase]));
 
-  for (const mercado of marketplaces) {
+  for (const mercado of marketplacesPriorizados) {
     if (resto <= 0) break;
     quotas.set(mercado, quotas.get(mercado) + 1);
     resto -= 1;
   }
 
-  const escolhidasPorMarketplace = new Map(marketplaces.map((m) => [m, []]));
+  const escolhidasPorMarketplace = new Map(marketplacesPriorizados.map((m) => [m, []]));
   const chavesSelecionadas = new Set();
 
-  for (const mercado of marketplaces) {
+  for (const mercado of marketplacesPriorizados) {
     const lista = porMarketplace.get(mercado);
     const quota = quotas.get(mercado);
 
@@ -907,7 +949,7 @@ function selecionarOfertasBalanceadas(ofertasRankeadas, totalDesejado = 6) {
   }
 
   let balanceadas = intercalarOfertasPorMarketplace(
-    marketplaces.flatMap((mercado) => escolhidasPorMarketplace.get(mercado))
+    marketplacesPriorizados.flatMap((mercado) => escolhidasPorMarketplace.get(mercado))
   );
 
   if (balanceadas.length < total) {

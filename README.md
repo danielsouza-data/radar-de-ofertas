@@ -39,7 +39,7 @@ Enviar ofertas em producao:
 node disparo-completo.js
 ```
 
-Iniciar modo agendado (5 em 5 min, de 09h ate 22h):
+Iniciar modo agendado (5 em 5 min, de 09h ate 17h):
 
 ```powershell
 node agendador-envios.js
@@ -55,7 +55,7 @@ node disparo-completo.js
 ## Arquivos principais
 
 - `disparo-completo.js`: fluxo oficial de envio
-- `agendador-envios.js`: agenda disparos automaticos de 5 em 5 minutos na janela 09h-22h
+- `agendador-envios.js`: agenda disparos automaticos de 5 em 5 minutos na janela 09h-17h
 - `autenticar-sessao.js`: cria ou renova a sessao do WhatsApp
 - `bin/dashboard-server.js`: servidor local do dashboard
 - `public/dashboard.html`: painel principal
@@ -67,11 +67,31 @@ node disparo-completo.js
 
 - Usar sempre `disparo-completo.js` como fluxo oficial
 - Para rotina diaria, manter `agendador-envios.js` em execucao
-- Janela de envios automaticos: 09:00 ate 22:00, todos os dias
+- Janela de envios automaticos: 09:00 ate 17:00, todos os dias
 - Disparo pontual deve ser feito manualmente quando solicitado
 - Ofertas sem imagem sao puladas automaticamente
 - O dashboard le os logs locais e o status do WhatsApp
 - A sessao autenticada fica salva em `.wwebjs_sessions/producao/`
+
+## Runbook de homologacao e producao
+
+- Homologacao deve usar grupo dedicado de testes, sem reutilizar o canal normal de producao
+- Em homologacao, manter `RADAR_TEST_MODE=true` para bloquear envio acidental ao `WHATSAPP_PROD_CHANNEL_ID`
+- Essa trava tambem vale para `scripts/enviar-mensagem-encerramento.js`, evitando mensagem final acidental no grupo de producao durante testes
+- Ao validar Mercado Livre, manter `MERCADO_LIVRE_LINKBUILDER_REQUIRE_SHORT=true` e `MERCADO_LIVRE_LINKBUILDER_STRICT_MATCH=true`
+- Em `STRICT_MATCH=true`, item de Mercado Livre sem mapa exato nao pode usar fallback do pool de `meli.la`
+- Para testes focados em ML, pode-se usar temporariamente `RADAR_ONLY_MARKETPLACE=ml`
+- Para validar volume ML em homologacao, a curadoria pode ser relaxada temporariamente com `CURADORIA_MIN_SALES=0` e `CURADORIA_MIN_RATING=0`
+- Encerrada a homologacao, restaurar `WHATSAPP_CHANNEL_NAME` e `WHATSAPP_CHANNEL_ID` para o grupo normal e reiniciar `agendador-envios.js` e `bin/dashboard-server.js`
+- Antes de voltar para producao, encerrar processos/sessoes de teste e limpar `data/disparo-global.lock` se existir
+- No encerramento das 17:00, o monitor envia a mensagem final no grupo normal e depois reposiciona o `.env` para o grupo de testes automaticamente
+
+## Mercado Livre
+
+- Pool oficial do Link Builder expandida e persistida em `mercadolivre-linkbuilder-links.txt`
+- Mapa produto -> shortlink persistido em `mercadolivre-linkbuilder-map.txt`
+- Anti-repeticao de ML agora considera link enviado, `source_link/raw_link` e `product_id`, evitando reenvio do mesmo produto com shortlink diferente
+- O Link Builder pode recusar algumas URLs; nesses casos, elas devem ser descartadas sem quebrar o pareamento de ordem do lote
 
 ## Atualizacoes recentes (Mar/2026)
 
@@ -91,8 +111,8 @@ node disparo-completo.js
 ### Resultado esperado em runtime
 
 - Com Shopee + ML disponiveis no ciclo, os envios seguem o loop:
-	1. Shopee
-	2. Mercado Livre
-	3. Shopee
-	4. Mercado Livre
+  1. Shopee
+  2. Mercado Livre
+  3. Shopee
+  4. Mercado Livre
 - O dashboard continua atualizado por `data/disparos-log.json` e `data/whatsapp-status.json`
