@@ -30,7 +30,6 @@ COPY bin/ ./bin/
 COPY public/ ./public/
 COPY src/ ./src/
 COPY scripts/ ./scripts/
-COPY data/ ./data/
 COPY autenticar-sessao.js ./
 COPY agendador-envios.js ./
 COPY disparo-completo.js ./
