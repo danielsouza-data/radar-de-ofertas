@@ -1,7 +1,11 @@
 node_modules/
+node-portable/
+node_local/
+node-local/
 .env
 .env.local
 logs/
+.wwebjs_cache/
 .wwebjs_sessions/
 session.json
 qr-code.txt
@@ -12,3 +16,4 @@ src/historico-ofertas.json
 .DS_Store
 dist/
 build/
+radar-de-ofertas/
