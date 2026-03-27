@@ -61,6 +61,8 @@ const ML_LINKBUILDER_STRICT_MATCH = String(
 const ML_JANELA_INICIO_HORA = Math.max(0, Math.min(23, Number(process.env.ML_JANELA_INICIO_HORA || 8)));
 const ML_JANELA_FIM_HORA = Math.max(0, Math.min(23, Number(process.env.ML_JANELA_FIM_HORA || 22)));
 const ML_INTERVALO_MINUTOS = Math.max(1, Number(process.env.ML_INTERVALO_MINUTOS || 5));
+const CURADORIA_MIN_RATING = Math.max(0, Number(process.env.CURADORIA_MIN_RATING || 0.1));
+const CURADORIA_MIN_SALES = Math.max(0, Number(process.env.CURADORIA_MIN_SALES || 1));
 
 const MERCADO_LIVRE_HEADERS = {
   'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
@@ -382,14 +384,19 @@ function mapearResultadosMercadoLivre(results = []) {
         slug = 'produto';
       }
 
+      const precoAtual = Number(item.price || 0);
+      const precoOriginalApi = Number(item.original_price || 0);
+      const precoOriginal = precoOriginalApi > precoAtual ? precoOriginalApi : precoAtual;
+
       return {
         marketplace: 'Mercado Livre',
         product_id: item.id,
         product_name: String(item.title || '').substring(0, 70),
         slug,
-        price: Number(item.price || 0),
-        original_price: Number(item.original_price || 0) || Number(item.price || 0) * 1.3,
+        price: precoAtual,
+        original_price: precoOriginal,
         rating: Number(item?.seller_address ? 4.6 : 4.4),
+        sales: Number(item?.sold_quantity || 0),
         raw_link: item.permalink || '' ,
         image_url: item.thumbnail || ''
       };
@@ -404,6 +411,18 @@ function normalizarPrecoMercadoLivre(fracao = '', centavos = '') {
   return base + dec;
 }
 
+function extrairVendasTextoMercadoLivre(texto = '') {
+  const t = String(texto || '').toLowerCase().trim();
+  if (!t) return 0;
+
+  const match = t.match(/(\d+[\d\.]*)\s*(mil)?\s+vendid/);
+  if (!match) return 0;
+
+  const base = Number(String(match[1]).replace(/\./g, ''));
+  if (!Number.isFinite(base) || base <= 0) return 0;
+  return match[2] ? base * 1000 : base;
+}
+
 function extrairSlugDeLink(url) {
   try {
     const parsed = new URL(url);
@@ -414,9 +433,24 @@ function extrairSlugDeLink(url) {
   }
 }
 
-function gerarProductIdWeb(link, titulo, index) {
-  const seed = `${link || ''}|${titulo || ''}|${index}`;
-  return `WEB-${crypto.createHash('md5').update(seed).digest('hex').slice(0, 12)}`;
+function extrairProductIdMercadoLivre(link = '') {
+  const raw = String(link || '');
+  if (!raw) return '';
+
+  const regexes = [
+    /\/p\/(MLB\d+)/i,
+    /\/(MLB-\d+)-/i,
+    /[?&]item_id=(MLB\d+)/i
+  ];
+
+  for (const re of regexes) {
+    const match = raw.match(re);
+    if (match && match[1]) {
+      return String(match[1]).toUpperCase().replace('-', '');
+    }
+  }
+
+  return '';
 }
 
 async function buscarMercadoLivreScraping(keyword = 'eletrônicos', limite = 10) {
@@ -450,20 +484,33 @@ async function buscarMercadoLivreScraping(keyword = 'eletrônicos', limite = 10)
       const preco = normalizarPrecoMercadoLivre(fracao, centavos);
       if (!Number.isFinite(preco) || preco <= 0) return;
 
+      const fracaoOriginal = node.find('.ui-search-price__original-value .andes-money-amount__fraction').first().text().trim();
+      const centavosOriginal = node.find('.ui-search-price__original-value .andes-money-amount__cents').first().text().trim();
+      const precoOriginalExtraido = normalizarPrecoMercadoLivre(fracaoOriginal, centavosOriginal);
+      const precoOriginal = Number.isFinite(precoOriginalExtraido) && precoOriginalExtraido > preco
+        ? precoOriginalExtraido
+        : preco;
+
       const imagem =
         node.find('img').first().attr('data-src') ||
         node.find('img').first().attr('src') ||
         '';
 
       const slug = extrairSlugDeLink(rawLink);
+      const productId = extrairProductIdMercadoLivre(rawLink);
+      if (!productId) return;
+      const vendasTexto = node.find('.ui-search-item__group__element--sales').first().text().trim();
+      const sales = extrairVendasTextoMercadoLivre(vendasTexto);
+
       itens.push({
         marketplace: 'Mercado Livre',
-        product_id: gerarProductIdWeb(rawLink, titulo, index),
+        product_id: productId,
         product_name: titulo.substring(0, 70),
         slug,
         price: preco,
-        original_price: preco * 1.3,
+        original_price: precoOriginal,
         rating: 4.4,
+        sales,
         raw_link: rawLink,
         image_url: imagem
       });
@@ -624,10 +671,22 @@ async function buscarMercadoLivre(keyword = 'eletrônicos', limite = 10) {
 // ============ NORMALIZAÇÃO ============
 
 function normalizarOfertas(shopee = [], mercadolivre = [], options = {}) {
+  const calcularDescontoSeguro = (precoAtual, precoOriginal) => {
+    const atual = Number(precoAtual || 0);
+    const original = Number(precoOriginal || 0);
+
+    if (!Number.isFinite(atual) || atual <= 0) return 0;
+    if (!Number.isFinite(original) || original <= atual) return 0;
+
+    return Math.max(0, Math.round(((original - atual) / original) * 100));
+  };
+
   const ofertas = [];
   const linksOficiaisMl = Array.isArray(options?.mlLinkBuilderLinks) ? options.mlLinkBuilderLinks : [];
   const requireShortMl = options?.requireMlShortLink !== false;
   const strictMlMatch = requireShortMl ? options?.strictMlShortMatch !== false : options?.strictMlShortMatch === true;
+  const totalLinksCurtosOficiais = linksOficiaisMl.filter(ehLinkMercadoLivreCurto).length;
+  let cursorLinkCurtoPool = 0;
 
   // Normalizar Shopee
   shopee.forEach(item => {
@@ -640,8 +699,9 @@ function normalizarOfertas(shopee = [], mercadolivre = [], options = {}) {
       product_name: item.product_name,
       price: item.price,
       original_price: item.original_price,
-      discount: Math.round(((item.original_price - item.price) / item.original_price) * 100),
+      discount: calcularDescontoSeguro(item.price, item.original_price),
       rating: item.rating,
+      sales: Number(item.sales || 0),
       imageUrl: item.image_url || '',
       // Usar affiliate_link se vem da API, senão gerar manualmente
       link: item.affiliate_link || gerarLinkShopee(item.seller_id, item.product_id, item.product_name),
@@ -651,19 +711,25 @@ function normalizarOfertas(shopee = [], mercadolivre = [], options = {}) {
   });
 
   // Normalizar Mercado Livre
-  mercadolivre.forEach((item, idx) => {
+  mercadolivre.forEach((item) => {
     const linkOficialMapeado = obterLinkCurtoMercadoLivreMapeado(item);
-    const linkOficialPool = linksOficiaisMl.length > 0
-      ? linksOficiaisMl[idx % linksOficiaisMl.length]
+    const linkCurtoPool = ehLinkMercadoLivreCurto(linksOficiaisMl[cursorLinkCurtoPool] || '')
+      ? linksOficiaisMl[cursorLinkCurtoPool]
       : '';
-    // Prioridade: mapeado por produto > pool rotativo > fallback
-    const linkOficial = linkOficialMapeado || linkOficialPool;
+    if (linkCurtoPool) {
+      cursorLinkCurtoPool += 1;
+    }
+
+    // Regra de integridade principal: prioriza link curto mapeado para o proprio item.
+    // Fallback controlado: quando o mapa estiver vazio/incompleto, utiliza link curto do pool para manter saida sempre encurtada.
+    const linkOficial = ehLinkMercadoLivreCurto(linkOficialMapeado) ? linkOficialMapeado : '';
     const linkFallback = gerarLinkMercadoLivre(item.product_id, item.slug, item.raw_link);
-    const linkFinal = linkOficial || ((requireShortMl && strictMlMatch) ? '' : linkFallback);
+    const linkFinal = linkOficial || linkCurtoPool || ((requireShortMl || strictMlMatch) ? '' : linkFallback);
+    const sourceLink = normalizarUrlMercadoLivre(item.raw_link || `https://www.mercadolivre.com.br/${item.slug || 'produto'}/p/${item.product_id}`);
 
     if (!linkFinal) {
-      if (requireShortMl && strictMlMatch) {
-        console.warn(`[ML] Produto sem link curto mapeado no Link Builder: ${item.product_name}`);
+      if (requireShortMl || strictMlMatch) {
+        console.warn(`[ML] Produto sem link curto mapeado no Link Builder: ${item.product_name} (id=${item.product_id})`);
       }
       return;
     }
@@ -674,13 +740,19 @@ function normalizarOfertas(shopee = [], mercadolivre = [], options = {}) {
       product_name: item.product_name,
       price: item.price,
       original_price: item.original_price,
-      discount: Math.round(((item.original_price - item.price) / item.original_price) * 100),
+      discount: calcularDescontoSeguro(item.price, item.original_price),
       rating: item.rating,
+      sales: Number(item.sales || 0),
       imageUrl: item.image_url || '',
       link: linkFinal,
+      source_link: sourceLink,
       commission_rate: null
     });
   });
+
+  if ((requireShortMl || strictMlMatch) && mercadolivre.length > 0) {
+    console.log(`[ML] Integridade de links curtos: ${ofertas.filter((o) => o.marketplace === 'Mercado Livre').length}/${mercadolivre.length} oferta(s) ML aprovadas (${totalLinksCurtosOficiais} links curtos oficiais disponiveis no ciclo).`);
+  }
 
   return ofertas;
 }
@@ -851,6 +923,41 @@ function selecionarOfertasBalanceadas(ofertasRankeadas, totalDesejado = 6) {
   return intercalarOfertasPorMarketplace(balanceadas).slice(0, total);
 }
 
+function aplicarCuradoriaQualidade(ofertasLista = []) {
+  const rejeitadas = [];
+  const aprovadas = [];
+
+  ofertasLista.forEach((oferta) => {
+    const rating = Number(oferta?.rating || 0);
+    const sales = Number(oferta?.sales || 0);
+
+    if (!Number.isFinite(rating) || rating < CURADORIA_MIN_RATING) {
+      rejeitadas.push({ oferta, motivo: `rating<${CURADORIA_MIN_RATING}` });
+      return;
+    }
+
+    if (!Number.isFinite(sales) || sales < CURADORIA_MIN_SALES) {
+      rejeitadas.push({ oferta, motivo: `sales<${CURADORIA_MIN_SALES}` });
+      return;
+    }
+
+    aprovadas.push(oferta);
+  });
+
+  if (rejeitadas.length > 0) {
+    const porMotivo = rejeitadas.reduce((acc, r) => {
+      acc[r.motivo] = (acc[r.motivo] || 0) + 1;
+      return acc;
+    }, {});
+    const resumo = Object.entries(porMotivo).map(([k, v]) => `${k}: ${v}`).join(' | ');
+    console.log(`[CURADORIA] ${rejeitadas.length} oferta(s) descartada(s) por qualidade (${resumo})`);
+  } else {
+    console.log('[CURADORIA] Nenhuma oferta descartada por qualidade');
+  }
+
+  return aprovadas;
+}
+
 // ============ MAIN ============
 
 async function executar() {
@@ -895,6 +1002,8 @@ async function executar() {
       ofertas = ofertas.filter((o) => o.marketplace === onlyMarketplace);
       console.log(`[FILTRO] RADAR_ONLY_MARKETPLACE=${onlyMarketplace} aplicado`);
     }
+
+    ofertas = aplicarCuradoriaQualidade(ofertas);
 
     console.log(`[NORMALIZADO] ${ofertas.length} ofertas`);
 

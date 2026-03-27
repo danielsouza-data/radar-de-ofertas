@@ -6,6 +6,8 @@
 
 const { Client, LocalAuth, MessageMedia } = require('whatsapp-web.js');
 const fs = require('fs');
+const axios = require('axios');
+const cheerio = require('cheerio');
 const {
   executar: processarOfertas,
   intercalarOfertasPorMarketplace
@@ -35,6 +37,8 @@ const OFFER_LIMIT = parseEnvInt(process.env.OFFER_LIMIT, 0);
 const MAX_REPROCESS_POR_OFERTA = parseEnvInt(process.env.MAX_REPROCESS_POR_OFERTA, 1);
 const LOCK_STALE_MS = parseEnvInt(process.env.SEND_LOCK_STALE_MS, DEFAULT_STALE_MS);
 const ACK_TIMEOUT_MS = parseEnvInt(process.env.ACK_TIMEOUT_MS, 45000);
+const ANTI_REPETICAO_JANELA_HORAS = parseEnvInt(process.env.ANTI_REPETICAO_JANELA_HORAS, 24);
+const ML_REFRESH_PRICE_BEFORE_SEND = String(process.env.ML_REFRESH_PRICE_BEFORE_SEND || 'true').toLowerCase() !== 'false';
 const LOCK_FILE = PATHS.GLOBAL_LOCK;
 const FAIL_LOG_FILE = PATHS.DISPAROS_FALHAS;
 const FILA_REPROCESS_FILE = PATHS.FILA_REPROCESSAMENTO;
@@ -50,20 +54,28 @@ console.log(`[IMPORTANTE] Execute autenticar-sessao.js primeiro!\n`);
 // Formatar mensagem WhatsApp
 function formatarMensagem(oferta, numero, total) {
   const rating = '⭐'.repeat(Math.min(Math.round(oferta.rating), 5));
+  const precoAtual = oferta.price.toLocaleString('pt-BR', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2
+  });
+  const precoOriginal = Number(oferta.original_price || 0).toLocaleString('pt-BR', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2
+  });
+  const precoAtualNumero = Number(oferta.price || 0);
+  const precoOriginalNumero = Number(oferta.original_price || 0);
+  const descontoNumero = Number(oferta.discount || 0);
+  const temDescontoValido = descontoNumero > 0 && precoOriginalNumero > precoAtualNumero;
+  const blocoPreco = temDescontoValido
+    ? `🔥 ${descontoNumero}% OFF\nDe: ~~R$ ${precoOriginal}~~\nPor: 💰 *R$ ${precoAtual}*`
+    : `Por: 💰 *R$ ${precoAtual}*`;
 
   return `🛒 *Radar de Ofertas*
 
 ${oferta.product_name}
 🏪 ${oferta.marketplace}
 
-💰 *R$ ${oferta.price.toLocaleString('pt-BR', {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2
-  })}* 🔥 ${oferta.discount}% OFF
-~~R$ ${oferta.original_price.toLocaleString('pt-BR', {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2
-  })}~~
+${blocoPreco}
 
 ${rating}
 
@@ -353,6 +365,128 @@ function ehMarketplaceShopee(marketplace) {
   return normalizarTexto(marketplace).includes('shopee');
 }
 
+function normalizarNumeroPreco(valor) {
+  const raw = String(valor || '').trim();
+  if (!raw) return null;
+
+  const semMoeda = raw.replace(/\s|R\$/gi, '');
+  const semMilhar = semMoeda.replace(/\.(?=\d{3}(\D|$))/g, '');
+  const decimalComPonto = semMilhar.replace(',', '.');
+  const num = Number(decimalComPonto);
+
+  return Number.isFinite(num) && num > 0 ? num : null;
+}
+
+function extrairPrecoHtmlMercadoLivre(html = '') {
+  if (!html) return { precoAtual: null, precoOriginal: null };
+
+  const $ = cheerio.load(html);
+
+  const metaPrice =
+    normalizarNumeroPreco($('meta[itemprop="price"]').attr('content')) ||
+    normalizarNumeroPreco($('meta[property="product:price:amount"]').attr('content'));
+
+  const fracAtual = $('main .andes-money-amount:not(.andes-money-amount--previous) .andes-money-amount__fraction').first().text().trim() ||
+    $('main .andes-money-amount__fraction').first().text().trim();
+  const centsAtual = $('main .andes-money-amount:not(.andes-money-amount--previous) .andes-money-amount__cents').first().text().trim() ||
+    $('main .andes-money-amount__cents').first().text().trim();
+  const blocoAtual = `${fracAtual}${centsAtual ? `,${centsAtual}` : ''}`;
+  let precoAtual = metaPrice || normalizarNumeroPreco(blocoAtual);
+
+  const fracOrig =
+    $('.ui-pdp-price__original-value .andes-money-amount__fraction').first().text().trim() ||
+    $('.andes-money-amount--previous .andes-money-amount__fraction').first().text().trim();
+  const centsOrig =
+    $('.ui-pdp-price__original-value .andes-money-amount__cents').first().text().trim() ||
+    $('.andes-money-amount--previous .andes-money-amount__cents').first().text().trim();
+  const blocoOrig = `${fracOrig}${centsOrig ? `,${centsOrig}` : ''}`;
+  let precoOriginalExtraido = normalizarNumeroPreco(blocoOrig);
+
+  // Quando a página expõe valores invertidos por estrutura dinâmica, corrigimos de forma defensiva.
+  if (precoAtual && precoOriginalExtraido && precoOriginalExtraido < precoAtual) {
+    const tmp = precoAtual;
+    precoAtual = precoOriginalExtraido;
+    precoOriginalExtraido = tmp;
+  }
+
+  const precoOriginal = precoOriginalExtraido && precoAtual && precoOriginalExtraido > precoAtual
+    ? precoOriginalExtraido
+    : precoAtual;
+
+  return { precoAtual, precoOriginal };
+}
+
+function calcularDescontoSeguro(precoAtual, precoOriginal) {
+  const atual = Number(precoAtual || 0);
+  const original = Number(precoOriginal || 0);
+
+  if (!Number.isFinite(atual) || atual <= 0) return 0;
+  if (!Number.isFinite(original) || original <= atual) return 0;
+
+  return Math.max(0, Math.round(((original - atual) / original) * 100));
+}
+
+function extrairIdMercadoLivreDeLink(link = '') {
+  const raw = String(link || '');
+  if (!raw) return '';
+
+  const regexes = [
+    /\/p\/(MLB\d+)/i,
+    /\/(MLB-\d+)-/i,
+    /[?&]item_id=(MLB\d+)/i
+  ];
+
+  for (const re of regexes) {
+    const match = raw.match(re);
+    if (match && match[1]) {
+      return String(match[1]).toUpperCase().replace('-', '');
+    }
+  }
+
+  return '';
+}
+
+async function sincronizarPrecoMercadoLivre(oferta) {
+  if (!ML_REFRESH_PRICE_BEFORE_SEND) return;
+  if (!ehMarketplaceMercadoLivre(oferta?.marketplace)) return;
+  const urlPreco = oferta?.source_link || oferta?.raw_link || oferta?.link;
+  if (!urlPreco) return;
+
+  try {
+    const response = await axios.get(urlPreco, {
+      timeout: 15000,
+      maxRedirects: 5,
+      headers: {
+        'User-Agent': 'Mozilla/5.0',
+        'Accept-Language': 'pt-BR,pt;q=0.9'
+      }
+    });
+
+    const idEsperado = extrairIdMercadoLivreDeLink(urlPreco) || String(oferta.product_id || '');
+    const finalUrl = response?.request?.res?.responseUrl || oferta.link;
+    const idObtido = extrairIdMercadoLivreDeLink(finalUrl);
+
+    if (idEsperado && (!idObtido || idEsperado !== idObtido)) {
+      console.warn(`[ML_PRICE_SYNC_WARN] Mismatch/ausencia de produto no sync de preco: esperado=${idEsperado} obtido=${idObtido || 'NA'}.`);
+      return;
+    }
+
+    const { precoAtual, precoOriginal } = extrairPrecoHtmlMercadoLivre(response.data);
+    if (!precoAtual) return;
+
+    const precoAnterior = Number(oferta.price || 0);
+    oferta.price = precoAtual;
+    oferta.original_price = precoOriginal || precoAtual;
+    oferta.discount = calcularDescontoSeguro(oferta.price, oferta.original_price);
+
+    if (Math.abs(precoAnterior - precoAtual) >= 0.01) {
+      console.log(`[ML_PRICE_SYNC] ${oferta.product_name}: ${precoAnterior.toFixed(2)} -> ${precoAtual.toFixed(2)}`);
+    }
+  } catch (err) {
+    console.warn(`[ML_PRICE_SYNC_WARN] ${err.message}`);
+  }
+}
+
 function carregarHistoricoDisparos() {
   try {
     if (!fs.existsSync(LOG_DISPAROS)) {
@@ -362,11 +496,16 @@ function carregarHistoricoDisparos() {
     const conteudo = fs.readFileSync(LOG_DISPAROS, 'utf8');
     const log = JSON.parse(conteudo);
     const disparos = Array.isArray(log?.disparos) ? log.disparos : [];
+    const janelaMs = ANTI_REPETICAO_JANELA_HORAS * 60 * 60 * 1000;
+    const limiteTimestamp = Date.now() - janelaMs;
 
     const seenLinks = new Set();
     const seenProdutos = new Set();
 
     disparos.forEach((d) => {
+      const ts = Number(d?.timestamp) || 0;
+      if (ts < limiteTimestamp) return;
+
       const link = normalizarTexto(d?.link);
       const marketplace = normalizarTexto(d?.marketplace);
       const produto = normalizarTexto(d?.produto);
@@ -390,10 +529,6 @@ function filtrarOfertasNaoEnviadas(ofertasLista) {
     const ofertaMarketplace = normalizarTexto(oferta?.marketplace);
     const ofertaProduto = normalizarTexto(oferta?.product_name);
     const produtoKey = `${ofertaMarketplace}|${ofertaProduto}`;
-
-    // Regra de negocio: manter ML sempre elegivel para sustentar alternancia 1x1
-    // entre Shopee e Mercado Livre no loop de envio.
-    if (ehMarketplaceMercadoLivre(ofertaMarketplace)) return true;
 
     if (ofertaLink && seenLinks.has(ofertaLink)) return false;
     if (ofertaMarketplace && ofertaProduto && seenProdutos.has(produtoKey)) {
@@ -524,6 +659,8 @@ async function enviarProxima() {
     console.log(`\n[${'='.repeat(20)}]`);
     console.log(`[${numero}/${ofertas.length}] Enviando...`);
     console.log(`[${'='.repeat(20)}]\n`);
+
+    await sincronizarPrecoMercadoLivre(oferta);
 
     const msg = formatarMensagem(oferta, numero, ofertas.length);
     console.log(msg);
