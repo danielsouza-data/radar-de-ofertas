@@ -1,0 +1,6 @@
+path,displayName,icon,role
+./agents/sre.agent.md,Engenheiro de Confiabilidade,🛡️,SRE
+./agents/security.agent.md,Especialista em Segurança,🔐,Security
+./agents/qa.agent.md,Analista de QA,🧪,QA
+./agents/product.agent.md,Estrategista de Produto,🚀,Product
+./agents/architect.agent.md,Arquiteto de Software,🏗️,Architect

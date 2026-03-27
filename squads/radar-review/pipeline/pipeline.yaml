@@ -1,0 +1,89 @@
+name: "Pipeline de Review — Radar de Ofertas"
+version: "1.0.0"
+description: >
+  Cinco especialistas analisam o sistema em sequência, cada um sob sua perspectiva.
+  Ao final, um relatório consolidado reúne todos os achados com ações priorizadas.
+
+steps:
+  - id: sre-review
+    agent: ./agents/sre.agent.md
+    label: "🛡️ Análise de Confiabilidade"
+    execution: inline
+    input: |
+      Analise o sistema Radar de Ofertas completo.
+      Leia os arquivos: disparo-completo.js, monitoramento.js, scheduler-dashboard.js
+      e qualquer arquivo em src/ que seja relevante para o fluxo de disparo.
+      Avalie confiabilidade, resiliência, recuperação de falhas, monitoramento e healthcheck.
+      Produza o relatório no formato definido na sua persona.
+    outputFile: squads/radar-review/output/sre-report.md
+
+  - id: security-review
+    agent: ./agents/security.agent.md
+    label: "🔐 Análise de Segurança"
+    execution: inline
+    input: |
+      Analise o sistema Radar de Ofertas completo sob a ótica de segurança.
+      Leia: .gitignore (se existir), disparo-completo.js, package.json,
+      todos os arquivos em src/, e qualquer .env ou arquivo de configuração.
+      Avalie credenciais, dados PII nos logs, proteção de sessão, dependências e hardening.
+      Produza o relatório no formato definido na sua persona.
+    outputFile: squads/radar-review/output/security-report.md
+
+  - id: qa-review
+    agent: ./agents/qa.agent.md
+    label: "🧪 Análise de Qualidade"
+    execution: inline
+    input: |
+      Analise o sistema Radar de Ofertas sob a ótica de qualidade e cobertura de testes.
+      Leia: disparo-completo.js, processador-ofertas.js, ofertas-curadas.js,
+      shopee-api-real.js, src/apis/mercadoLivre.js, e verifique se existe diretório test/.
+      Identifique funções sem teste, edge cases não cobertos e bugs silenciosos.
+      Proponha os 5 casos de teste mais críticos com código.
+      Produza o relatório no formato definido na sua persona.
+    outputFile: squads/radar-review/output/qa-report.md
+
+  - id: product-review
+    agent: ./agents/product.agent.md
+    label: "🚀 Análise de Produto"
+    execution: inline
+    input: |
+      Analise o Radar de Ofertas como produto de curadoria de ofertas via WhatsApp.
+      Leia: disparo-completo.js, ofertas-curadas.js, processador-ofertas.js,
+      shopee-api-real.js, src/apis/mercadoLivre.js, e o README.md se existir.
+      Avalie proposta de valor, jornada do assinante, oportunidades de melhoria de produto,
+      monetização via afiliados e roadmap de funcionalidades.
+      Produza o relatório no formato definido na sua persona.
+    outputFile: squads/radar-review/output/product-report.md
+
+  - id: architect-review
+    agent: ./agents/architect.agent.md
+    label: "🏗️ Análise Arquitetural"
+    execution: inline
+    input: |
+      Analise a arquitetura do sistema Radar de Ofertas.
+      Leia todos os arquivos .js na raiz e em src/, e a estrutura de diretórios completa.
+      Produza um mapa de dependências, identifique violações de princípios arquiteturais,
+      proponha uma arquitetura alvo e um plano de refatoração incremental.
+      Produza o relatório no formato definido na sua persona.
+    outputFile: squads/radar-review/output/architect-report.md
+
+  - id: consolidacao
+    type: checkpoint
+    label: "📋 Consolidação Final"
+    message: |
+      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+      ✅ Todos os 5 especialistas concluíram suas análises.
+
+      Os relatórios individuais foram salvos em:
+      - squads/radar-review/output/sre-report.md
+      - squads/radar-review/output/security-report.md
+      - squads/radar-review/output/qa-report.md
+      - squads/radar-review/output/product-report.md
+      - squads/radar-review/output/architect-report.md
+
+      Deseja que eu consolide todos os achados em um relatório executivo único
+      com as ações priorizadas por impacto?
+
+      1. Sim — gere o relatório executivo consolidado
+      2. Não — os relatórios individuais são suficientes
+      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

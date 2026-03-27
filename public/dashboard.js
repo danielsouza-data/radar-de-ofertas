@@ -1,0 +1,268 @@
+let contadorProxima = 15;
+let intervalRefresh = null;
+let intervalRelogio = null;
+const THEME_KEY = 'radar-dashboard-theme';
+
+function aplicarTema(tema) {
+  const isLight = tema === 'light';
+  document.body.classList.toggle('light-theme', isLight);
+
+  const btn = document.getElementById('theme-toggle');
+  if (btn) {
+    btn.textContent = isLight ? '☀️ Claro' : '🌙 Escuro';
+    btn.setAttribute('aria-label', isLight ? 'Tema claro ativo' : 'Tema escuro ativo');
+  }
+}
+
+function inicializarTema() {
+  const temaSalvo = localStorage.getItem(THEME_KEY) || 'dark';
+  aplicarTema(temaSalvo);
+
+  const btn = document.getElementById('theme-toggle');
+  if (!btn) return;
+
+  btn.addEventListener('click', () => {
+    const temaAtual = document.body.classList.contains('light-theme') ? 'light' : 'dark';
+    const proximoTema = temaAtual === 'light' ? 'dark' : 'light';
+    localStorage.setItem(THEME_KEY, proximoTema);
+    aplicarTema(proximoTema);
+  });
+}
+
+// ─── Relógio ────────────────────────────────────────────────────────────────
+function atualizarRelogio() {
+  const agora = new Date().toLocaleString('pt-BR', {
+    day: '2-digit', month: '2-digit', year: 'numeric',
+    hour: '2-digit', minute: '2-digit', second: '2-digit'
+  });
+  document.getElementById('hora-sistema').textContent = agora;
+}
+
+// ─── Contador de próxima atualização ────────────────────────────────────────
+function tickContador() {
+  contadorProxima--;
+  if (contadorProxima <= 0) {
+    contadorProxima = 15;
+    carregarDados();
+  }
+  const el = document.getElementById('proxima-atualizacao');
+  if (el) el.textContent = `Próxima atualização em ${contadorProxima}s`;
+}
+
+// ─── Carregar dados da API ───────────────────────────────────────────────────
+async function carregarDados() {
+  setStatus('Atualizando...', false);
+  contadorProxima = 15;
+
+  try {
+    const [resOfertas, resStats, resWhatsapp, resHealth, resPool] = await Promise.all([
+      fetch('/api/ofertas/enviadas'),
+      fetch('/api/stats'),
+      fetch('/api/whatsapp-status'),
+      fetch('/api/healthcheck'),
+      fetch('/api/link-pool-status')
+    ]);
+
+    if (!resOfertas.ok || !resStats.ok || !resWhatsapp.ok) throw new Error('Falha na API');
+
+    const dadosOfertas = await resOfertas.json();
+    const dadosStats  = await resStats.json();
+    const dadosWhatsapp = await resWhatsapp.json();
+    const dadosHealth = resHealth.ok ? await resHealth.json() : null;
+    const poolPayload = resPool.ok ? await resPool.json() : null;
+
+    renderStats(dadosStats, dadosOfertas);
+    renderTabela(dadosOfertas.ofertas || []);
+    renderWhatsappStatus(dadosWhatsapp);
+    renderAlertas(dadosHealth);
+    renderPoolStatus(poolPayload || dadosHealth?.poolMercadoLivre || null);
+
+    const el = document.getElementById('refresh-status');
+    if (el) el.textContent = `Atualizado às ${new Date().toLocaleTimeString('pt-BR')}`;
+
+  } catch (err) {
+    setStatus('Erro ao consultar status WhatsApp', false);
+    console.error('[ERR]', err);
+  }
+}
+
+function renderPoolStatus(pool) {
+  const totalEl = document.getElementById('pool-total-links');
+  const minimoEl = document.getElementById('pool-minimo');
+  const diaEl = document.getElementById('pool-necessario-dia');
+  const janelaEl = document.getElementById('pool-janela');
+  const badgeEl = document.getElementById('pool-status-badge');
+  const msgEl = document.getElementById('pool-status-msg');
+  const cardEl = document.getElementById('pool-status-card');
+
+  if (!totalEl || !minimoEl || !diaEl || !janelaEl || !badgeEl || !msgEl || !cardEl) return;
+
+  if (!pool) {
+    totalEl.textContent = '—';
+    minimoEl.textContent = '—';
+    diaEl.textContent = '—';
+    janelaEl.textContent = '—';
+    badgeEl.textContent = 'SEM DADOS';
+    badgeEl.className = 'pool-badge pool-warn';
+    msgEl.textContent = 'Não foi possível carregar o status do pool do Mercado Livre.';
+    cardEl.className = 'pool-status pool-warn';
+    return;
+  }
+
+  totalEl.textContent = Number(pool.totalLinks || 0);
+  minimoEl.textContent = Number(pool.minRecomendado || 0);
+  diaEl.textContent = Number(pool.linksNecessariosDiaAlternando || 0);
+  janelaEl.textContent = `${pool.janelaInicioHora ?? 8}h-${pool.janelaFimHora ?? 22}h / ${pool.intervaloMinutos ?? 5} min`;
+
+  if (!pool.cobreDiaAlternando) {
+    badgeEl.textContent = 'CRÍTICO';
+    badgeEl.className = 'pool-badge pool-critical';
+    cardEl.className = 'pool-status pool-critical';
+    msgEl.textContent = `Capacidade insuficiente para o dia: precisa ${pool.linksNecessariosDiaAlternando} links e possui ${pool.totalLinks}.`;
+    return;
+  }
+
+  if (!pool.atendeMinimo) {
+    badgeEl.textContent = 'ATENÇÃO';
+    badgeEl.className = 'pool-badge pool-warn';
+    cardEl.className = 'pool-status pool-warn';
+    msgEl.textContent = `Pool abaixo do mínimo: ${pool.totalLinks}/${pool.minRecomendado}.`;
+    return;
+  }
+
+  badgeEl.textContent = 'OK';
+  badgeEl.className = 'pool-badge pool-ok';
+  cardEl.className = 'pool-status pool-ok';
+  msgEl.textContent = `Cobertura adequada para o dia. Fonte: ${pool.fonte || 'arquivo'}.`;
+}
+
+function renderWhatsappStatus(wa) {
+  const status = String(wa?.status || 'unknown');
+  const detail = String(wa?.detail || 'Sem detalhe');
+  const stale = Boolean(wa?.stale);
+
+  const statusMap = {
+    ready: { text: 'WhatsApp conectado', ok: true },
+    authenticated: { text: 'Sessão autenticada', ok: true },
+    initializing: { text: 'Inicializando sessão', ok: false },
+    qr_required: { text: 'Aguardando leitura do QR', ok: false },
+    auth_failure: { text: 'Falha de autenticação', ok: false },
+    disconnected: { text: 'WhatsApp desconectado', ok: false },
+    error: { text: 'Erro no cliente WhatsApp', ok: false },
+    stopped: { text: 'Processo de disparo parado', ok: false },
+    state_change: { text: `Estado: ${detail}`, ok: !stale },
+    unknown: { text: 'Status ainda indisponível', ok: false }
+  };
+
+  const conf = statusMap[status] || { text: `Status: ${status}`, ok: !stale };
+  const sufixoStale = stale ? ' (sem atualização recente)' : '';
+  setStatus(conf.text + sufixoStale, conf.ok && !stale);
+}
+
+// ─── Alertas de saúde ────────────────────────────────────────────────────────
+function renderAlertas(health) {
+  const painel = document.getElementById('alertas-saude');
+  if (!painel) return;
+
+  if (!health || health.saudavel) {
+    painel.style.display = 'none';
+    painel.innerHTML = '';
+    return;
+  }
+
+  const alarmes = health.alarmes || [];
+  const itens = alarmes.map((a) => {
+    const cls = a.severidade === 'critico' ? 'alerta-critico' : 'alerta-aviso';
+    const icone = a.severidade === 'critico' ? '🚨' : '⚠️';
+    return `<div class="alerta-item ${cls}">${icone} ${escapeHtml(a.mensagem)}</div>`;
+  }).join('');
+
+  painel.innerHTML = itens;
+  painel.style.display = 'flex';
+}
+
+// ─── Status badge ────────────────────────────────────────────────────────────
+function setStatus(texto, ok) {
+  const dot  = document.getElementById('status-dot');
+  const span = document.getElementById('status-texto');
+  dot.className  = 'status-dot' + (ok ? ' conectado' : '');
+  span.textContent = texto;
+}
+
+// ─── Renderizar stats cards ──────────────────────────────────────────────────
+function renderStats(stats, dadosOfertas) {
+  document.getElementById('stat-total').textContent    = stats.total_enviado ?? '—';
+  document.getElementById('stat-desconto').textContent = stats.desconto_medio ? stats.desconto_medio + '%' : '—';
+  document.getElementById('stat-preco').textContent    = stats.preco_medio ? 'R$ ' + Number(stats.preco_medio).toLocaleString('pt-BR', {minimumFractionDigits:2}) : '—';
+  document.getElementById('stat-24h').textContent      = stats.ultimas_24h ?? '—';
+
+  // Último envio vem do dashboard endpoint
+  const ofertas = dadosOfertas.ofertas || [];
+  if (ofertas.length > 0) {
+    const ultimo = ofertas[0]; // já ordenado desc
+    document.getElementById('stat-ultimo').textContent = ultimo.data || '—';
+  } else {
+    document.getElementById('stat-ultimo').textContent = 'Nenhum';
+  }
+}
+
+// ─── Renderizar tabela ───────────────────────────────────────────────────────
+function renderTabela(ofertas) {
+  const tbody = document.getElementById('disparos-body');
+
+  if (!ofertas || ofertas.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="9" class="tabela-vazia">Nenhum disparo registrado ainda.</td></tr>';
+    return;
+  }
+
+  tbody.innerHTML = ofertas.map((o, idx) => {
+    const preco    = o.preco != null ? 'R$ ' + Number(o.preco).toLocaleString('pt-BR', {minimumFractionDigits:2}) : '—';
+    const desconto = o.desconto != null ? o.desconto + '%' : '—';
+    const badgeClass = o.desconto >= 50 ? 'badge-hot' : o.desconto >= 30 ? 'badge-warm' : 'badge-ok';
+    const reenvio  = o.reenvio ? ' <span class="tag-reenvio">↺</span>' : '';
+    const produto  = escapeHtml(o.produto || '—');
+    const marketplace = escapeHtml(o.marketplace || '—');
+    const data     = o.data || '—';
+    const link     = o.link ? `<a href="${escapeHtml(o.link)}" target="_blank" class="link-btn">🔗</a>` : '—';
+    const num      = typeof o.numero === 'number' ? o.numero : o.numero ?? (ofertas.length - idx);
+    const ack      = Number(o.ackEnvio ?? 0);
+    const tentativas = Number(o.tentativasEnvio ?? 1);
+    const recuperada = Boolean(o.entregaRecuperada);
+    const ackBadgeClass = ack >= 1 ? 'ack-ok' : 'ack-pendente';
+    const ackLabel = ack >= 1 ? `Confirmado (ack ${ack})` : `Pendente (ack ${ack})`;
+    const tentativasLabel = `${tentativas}${recuperada ? ' (rec)' : ''}`;
+    const tentativasTitle = recuperada
+      ? `Recuperado automaticamente. Erro: ${escapeHtml(o.erroRecuperado || 'n/d')}`
+      : 'Sem recuperação';
+
+    return `<tr>
+      <td class="col-num">${num}${reenvio}</td>
+      <td class="col-produto" title="${produto}">${produto}</td>
+      <td class="col-marketplace"><span class="marketplace-badge">${marketplace}</span></td>
+      <td class="col-preco">${preco}</td>
+      <td class="col-desconto"><span class="desconto-badge ${badgeClass}">${desconto}</span></td>
+      <td class="col-entrega"><span class="ack-badge ${ackBadgeClass}" title="${escapeHtml(o.messageId || 'sem messageId')}">${ackLabel}</span></td>
+      <td class="col-tentativas" title="${tentativasTitle}">${tentativasLabel}</td>
+      <td class="col-data">${data}</td>
+      <td class="col-link">${link}</td>
+    </tr>`;
+  }).join('');
+}
+
+// ─── Utilitário seguro ───────────────────────────────────────────────────────
+function escapeHtml(str) {
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+// ─── Init ────────────────────────────────────────────────────────────────────
+window.addEventListener('DOMContentLoaded', () => {
+  inicializarTema();
+  atualizarRelogio();
+  intervalRelogio  = setInterval(atualizarRelogio, 1000);
+  intervalRefresh  = setInterval(tickContador, 1000);
+  carregarDados();
+});

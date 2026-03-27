@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Radar de Ofertas - APIs</title>
+  <link rel="stylesheet" href="dashboard.css">
+</head>
+<body>
+  <div class="container">
+    <nav class="top-tabs" aria-label="Navegacao do Dashboard">
+      <a class="tab-link" href="/dashboard.html">Principal</a>
+      <a class="tab-link tab-active" href="/apis.html">APIs</a>
+    </nav>
+
+    <header class="header">
+      <div class="header-content">
+        <h1>API Explorer</h1>
+        <div class="header-right">
+          <button id="theme-toggle" class="btn-theme" type="button" aria-label="Alternar tema">🌙 Escuro</button>
+          <span id="hora-sistema" class="hora-sistema"></span>
+          <div class="status-badge">
+            <span class="status-dot conectado"></span>
+            <span id="status-texto">Conectado</span>
+          </div>
+        </div>
+      </div>
+    </header>
+
+    <section class="section">
+      <div class="section-header">
+        <h2>Endpoints do Dashboard</h2>
+        <div class="section-actions">
+          <span id="refresh-status" class="refresh-status"></span>
+          <button id="btn-refresh" class="btn-secondary" onclick="carregarApis()">↺ Atualizar</button>
+        </div>
+      </div>
+
+      <div class="api-grid">
+        <article class="api-card">
+          <div class="api-head">
+            <h3>/api/whatsapp-status</h3>
+            <a class="link-btn" href="/api/whatsapp-status" target="_blank" rel="noopener noreferrer" title="Abrir endpoint">🔗</a>
+          </div>
+          <pre id="api-whatsapp" class="api-json">Carregando...</pre>
+        </article>
+
+        <article class="api-card">
+          <div class="api-head">
+            <h3>/api/stats</h3>
+            <a class="link-btn" href="/api/stats" target="_blank" rel="noopener noreferrer" title="Abrir endpoint">🔗</a>
+          </div>
+          <pre id="api-stats" class="api-json">Carregando...</pre>
+        </article>
+
+        <article class="api-card">
+          <div class="api-head">
+            <h3>/api/ofertas/enviadas</h3>
+            <a class="link-btn" href="/api/ofertas/enviadas" target="_blank" rel="noopener noreferrer" title="Abrir endpoint">🔗</a>
+          </div>
+          <pre id="api-ofertas" class="api-json">Carregando...</pre>
+        </article>
+
+        <article class="api-card">
+          <div class="api-head">
+            <h3>/api/dashboard</h3>
+            <a class="link-btn" href="/api/dashboard" target="_blank" rel="noopener noreferrer" title="Abrir endpoint">🔗</a>
+          </div>
+          <pre id="api-dashboard" class="api-json">Carregando...</pre>
+        </article>
+      </div>
+    </section>
+
+    <footer class="footer">
+      <p>Visualizador formatado das APIs do Radar de Ofertas</p>
+    </footer>
+  </div>
+
+  <script src="apis.js"></script>
+</body>
+</html>

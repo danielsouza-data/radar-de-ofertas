@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>🛒 Radar de Ofertas - Dashboard</title>
+  <link rel="stylesheet" href="dashboard.css">
+</head>
+<body>
+  <div class="container">
+
+    <nav class="top-tabs" aria-label="Navegacao do Dashboard">
+      <a class="tab-link tab-active" href="/dashboard.html">Principal</a>
+      <a class="tab-link" href="/apis.html">APIs</a>
+    </nav>
+
+    <!-- Header -->
+    <header class="header">
+      <div class="header-content">
+        <h1>🛒 Radar de Ofertas</h1>
+        <div class="header-right">
+          <button id="theme-toggle" class="btn-theme" type="button" aria-label="Alternar tema">🌙 Escuro</button>
+          <span id="hora-sistema" class="hora-sistema"></span>
+          <div class="status-badge">
+            <span class="status-dot" id="status-dot"></span>
+            <span id="status-texto">Carregando...</span>
+          </div>
+        </div>
+      </div>
+    </header>
+
+    <!-- Painel de alertas de saúde -->
+    <section id="alertas-saude" class="alertas-saude" style="display:none" aria-live="polite"></section>
+
+    <!-- Stats Cards -->
+    <section class="stats">
+      <div class="stat-card">
+        <div class="stat-icon">📤</div>
+        <div class="stat-content">
+          <h3>Total Enviados</h3>
+          <p id="stat-total">—</p>
+        </div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-icon">🕐</div>
+        <div class="stat-content">
+          <h3>Último Envio</h3>
+          <p id="stat-ultimo" class="stat-small">—</p>
+        </div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-icon">🔥</div>
+        <div class="stat-content">
+          <h3>Desconto Médio</h3>
+          <p id="stat-desconto">—</p>
+        </div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-icon">💰</div>
+        <div class="stat-content">
+          <h3>Preço Médio</h3>
+          <p id="stat-preco">—</p>
+        </div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-icon">📅</div>
+        <div class="stat-content">
+          <h3>Últimas 24h</h3>
+          <p id="stat-24h">—</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="pool-status" id="pool-status-card" aria-live="polite">
+      <div class="pool-status-header">
+        <h2>🔗 Pool Mercado Livre</h2>
+        <span id="pool-status-badge" class="pool-badge pool-ok">OK</span>
+      </div>
+      <div class="pool-status-grid">
+        <div class="pool-metric">
+          <span class="pool-label">Links disponíveis</span>
+          <strong id="pool-total-links">—</strong>
+        </div>
+        <div class="pool-metric">
+          <span class="pool-label">Mínimo configurado</span>
+          <strong id="pool-minimo">—</strong>
+        </div>
+        <div class="pool-metric">
+          <span class="pool-label">Necessário por dia (8h-22h)</span>
+          <strong id="pool-necessario-dia">—</strong>
+        </div>
+        <div class="pool-metric">
+          <span class="pool-label">Janela / intervalo</span>
+          <strong id="pool-janela">—</strong>
+        </div>
+      </div>
+      <p id="pool-status-msg" class="pool-status-msg">Carregando status do pool...</p>
+    </section>
+
+    <!-- Tabela de Disparos -->
+    <section class="section">
+      <div class="section-header">
+        <h2>📋 Histórico de Disparos</h2>
+        <div class="section-actions">
+          <span id="refresh-status" class="refresh-status"></span>
+          <button id="btn-refresh" class="btn-secondary" onclick="carregarDados()">↺ Atualizar</button>
+        </div>
+      </div>
+
+      <div class="table-wrapper">
+        <table class="disparos-table" id="disparos-table">
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>Produto</th>
+              <th>Loja</th>
+              <th>Preço</th>
+              <th>Desconto</th>
+              <th>Entrega</th>
+              <th>Tentativas</th>
+              <th>Data / Hora</th>
+              <th>Link</th>
+            </tr>
+          </thead>
+          <tbody id="disparos-body">
+            <tr><td colspan="9" class="tabela-vazia">Carregando...</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- Footer -->
+    <footer class="footer">
+      <p>Atualização automática a cada 15s &nbsp;|&nbsp; <span id="proxima-atualizacao"></span></p>
+    </footer>
+
+  </div>
+  <script src="dashboard.js"></script>
+</body>
+</html>

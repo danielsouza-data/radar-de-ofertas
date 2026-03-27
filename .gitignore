@@ -1,0 +1,14 @@
+node_modules/
+.env
+.env.local
+logs/
+.wwebjs_sessions/
+session.json
+qr-code.txt
+data/
+historico-ofertas.json
+src/historico-ofertas.json
+*.log
+.DS_Store
+dist/
+build/
