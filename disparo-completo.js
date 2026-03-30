@@ -1,4 +1,26 @@
-#!/usr/bin/env node
+// Fallback: se não houver ML novas, força nova busca ML e injeta no fluxo
+async function garantirMLNovoNoFluxo(ofertas, buscarNovasOfertasML) {
+  const mlNovas = ofertas.filter(o => String(o.marketplace).toLowerCase().includes('ml') || String(o.marketplace).toLowerCase().includes('mercado livre'));
+  if (mlNovas.length > 0) return ofertas;
+
+  console.warn('[FALLBACK ML] Nenhuma oferta ML nova disponível após anti-repetição. Forçando nova busca ML...');
+  let novasML = [];
+  try {
+    novasML = await buscarNovasOfertasML();
+  } catch (err) {
+    console.error('[FALLBACK ML] Erro ao buscar novas ofertas ML:', err);
+    return ofertas;
+  }
+  // Filtra só ML realmente novas (não enviadas)
+  const novasMLNaoEnviadas = filtrarOfertasNaoEnviadas(novasML).filter(o => String(o.marketplace).toLowerCase().includes('ml') || String(o.marketplace).toLowerCase().includes('mercado livre'));
+  if (novasMLNaoEnviadas.length === 0) {
+    console.warn('[FALLBACK ML] Nenhuma oferta ML realmente nova encontrada na nova busca.');
+    return ofertas;
+  }
+  // Pré-curadoria: pode aplicar aqui se necessário
+  console.log(`[FALLBACK ML] ${novasMLNaoEnviadas.length} novas ofertas ML injetadas no fluxo.`);
+  return ofertas.concat(novasMLNaoEnviadas);
+}
 /**
  * DISPARO FINAL - INTEGRA TUDO
  * Usa src/processador-ofertas.js + WhatsApp Web.js
@@ -380,10 +402,12 @@ function liberarLock() {
 
 function registrarDisparo(oferta, numero, total, metaEnvio = {}) {
   try {
-    let log = { disparos: [] };
+    let log = { disparos: [], totalEnviados: 0, totalEnviadosHistorico: 0 };
     if (fs.existsSync(LOG_DISPAROS)) {
       const conteudo = fs.readFileSync(LOG_DISPAROS, 'utf8');
       log = JSON.parse(conteudo);
+      // Corrige se campo não existir
+      if (typeof log.totalEnviadosHistorico !== 'number') log.totalEnviadosHistorico = log.totalEnviados || 0;
     }
 
     log.disparos.push({
@@ -414,12 +438,13 @@ function registrarDisparo(oferta, numero, total, metaEnvio = {}) {
       category: metaEnvio.category || null
     });
 
-    // Manter apenas últimos 100 disparos
+    // Manter apenas últimos 100 disparos no array, mas não limitar o total histórico
     if (log.disparos.length > 100) {
       log.disparos = log.disparos.slice(-100);
     }
 
     log.totalEnviados = log.disparos.length;
+    log.totalEnviadosHistorico = (log.totalEnviadosHistorico || 0) + 1;
     log.ultimoEnvio = Date.now();
 
     fs.writeFileSync(LOG_DISPAROS, JSON.stringify(log, null, 2));
@@ -760,12 +785,23 @@ async function enviarProxima() {
       salvarFilaReprocessamento();
       index = 0;
 
+      // Reinicializar monitoramento global de ofertas enviadas neste ciclo de reprocessamento
+      global.ofertasEnviadasNesteCiclo = [];
+
       console.log('\n' + '='.repeat(70));
       console.log(`[REPROCESSAMENTO] Iniciando ciclo ${cicloReprocessamento} com ${ofertas.length} oferta(s) que falharam anteriormente`);
       console.log('='.repeat(70));
 
       setTimeout(enviarProxima, 2000);
       return;
+    }
+
+    // Log especial: verificar se alguma ML foi enviada neste ciclo
+    const enviadasML = (global.ofertasEnviadasNesteCiclo || []).filter(o => String(o.marketplace).toLowerCase().includes('ml') || String(o.marketplace).toLowerCase().includes('mercado livre'));
+    if (enviadasML.length === 0) {
+      console.warn('[MONITORAMENTO ML] Nenhuma oferta Mercado Livre foi enviada neste ciclo, mesmo após fallback/reset. Verifique se há ofertas válidas de ML disponíveis.');
+    } else {
+      console.log(`[MONITORAMENTO ML] ${enviadasML.length} oferta(s) Mercado Livre enviada(s) neste ciclo.`);
     }
 
     console.log('\n' + '='.repeat(70));
@@ -792,6 +828,8 @@ async function enviarProxima() {
   }
 
   const oferta = ofertas[index];
+  // Acumular ofertas enviadas neste ciclo para monitoramento ML
+  if (!global.ofertasEnviadasNesteCiclo) global.ofertasEnviadasNesteCiclo = [];
   const numero = index + 1;
   oferta.offerKey = getOfferKey(oferta);
   atualizarHealthWorker('sending', {
@@ -872,6 +910,17 @@ async function enviarProxima() {
     if (metaEnvio.houveRecuperacao) {
       console.log(`[RECOVERY] Envio recuperado apos ${metaEnvio.tentativas} tentativa(s).`);
     }
+    // Log detalhado do envio: ML ou Shopee
+    const isML = (oferta.marketplace||'').toLowerCase().includes('ml') || (oferta.marketplace||'').toLowerCase().includes('mercado livre');
+    const isShopee = (oferta.marketplace||'').toLowerCase().includes('shopee');
+    if (isML) {
+      console.log(`[MONITORAMENTO ML] Oferta ML enviada: produto='${oferta.product_name}', id='${oferta.product_id}', link='${oferta.link||oferta.tracking_link||''}'`);
+    } else if (isShopee) {
+      console.log(`[MONITORAMENTO SHOPEE] Oferta Shopee enviada: produto='${oferta.product_name}', id='${oferta.product_id}', link='${oferta.link||oferta.tracking_link||''}'`);
+    } else {
+      console.log(`[MONITORAMENTO OUTRO] Oferta enviada: marketplace='${oferta.marketplace}', produto='${oferta.product_name}', id='${oferta.product_id}', link='${oferta.link||oferta.tracking_link||''}'`);
+    }
+    global.ofertasEnviadasNesteCiclo.push(oferta);
 
     metaEnvio.trackingEnabled = tracking.trackingEnabled;
     metaEnvio.trackingToken = tracking.trackingToken;
@@ -954,17 +1003,40 @@ client.on('ready', async () => {
     console.log('[PROCESSANDO] Buscando e rankando ofertas...\n');
     ofertas = await processarOfertas();
 
+    // Inicializar monitoramento global de ofertas enviadas neste ciclo
+    global.ofertasEnviadasNesteCiclo = [];
 
-    // Força alternância Shopee/ML no fluxo inteiro
+    // Alternância Shopee/ML no lote inteiro de ofertas, sempre
+    const { intercalarOfertasPorMarketplace } = require('./src/processador-ofertas');
     if (reenviarPrimeirasOfertasHoje) {
-      const { intercalarOfertasPorMarketplace } = require('./src/processador-ofertas');
-      ofertas = intercalarOfertasPorMarketplace(ofertas).slice(0, 6);
-      console.log(`[REENVIO] Forçando alternância Shopee/ML nas 6 primeiras ofertas. Shopee: ${ofertas.filter(o => (o.marketplace||'').toLowerCase().includes('shopee')).length}, ML: ${ofertas.filter(o => (o.marketplace||'').toLowerCase().includes('mercado livre')||(o.marketplace||'').toLowerCase()==='ml').length}`);
+      ofertas = intercalarOfertasPorMarketplace(ofertas);
+      console.log(`[REENVIO] Alternância Shopee/ML aplicada ao lote inteiro. Shopee: ${ofertas.filter(o => (o.marketplace||'').toLowerCase().includes('shopee')).length}, ML: ${ofertas.filter(o => (o.marketplace||'').toLowerCase().includes('mercado livre')||(o.marketplace||'').toLowerCase()==='ml').length}`);
       reenviarPrimeirasOfertasHoje = false;
     } else {
-      const { intercalarOfertasPorMarketplace } = require('./src/processador-ofertas');
       ofertas = filtrarOfertasNaoEnviadas(ofertas);
+
+      // Fallback ML: se não houver ML novas, força nova busca ML e injeta no fluxo
+      const buscarNovasOfertasML = async () => {
+        const { buscarOfertasMercadoLivreIneditas } = require('./src/processador-ofertas');
+        const historico = require('./src/processador-ofertas').carregarHistorico ? require('./src/processador-ofertas').carregarHistorico() : { offers: [] };
+        let novas = await buscarOfertasMercadoLivreIneditas({ quantidade: 20, historicoOfertas: historico.offers });
+        const { autenticarLinkBuilder, gerarLinkMercadoLivre } = require('./src/processador-ofertas');
+        await autenticarLinkBuilder();
+        novas = novas.map(oferta => {
+          if ((oferta.marketplace||'').toLowerCase().includes('ml') || (oferta.marketplace||'').toLowerCase().includes('mercado livre')) {
+            oferta.link = gerarLinkMercadoLivre(oferta.product_id, oferta.product_slug, oferta.rawLink || oferta.link);
+          }
+          return oferta;
+        });
+        return novas;
+      };
+      const { garantirMLNovoNoFluxo } = require('./disparo-completo.js');
+      if (typeof garantirMLNovoNoFluxo === 'function') {
+        ofertas = await garantirMLNovoNoFluxo(ofertas, buscarNovasOfertasML);
+      }
+
       ofertas = intercalarOfertasPorMarketplace(ofertas);
+      console.log(`[ALTERNANCIA] Shopee/ML aplicada ao lote inteiro. Shopee: ${ofertas.filter(o => (o.marketplace||'').toLowerCase().includes('shopee')).length}, ML: ${ofertas.filter(o => (o.marketplace||'').toLowerCase().includes('mercado livre')||(o.marketplace||'').toLowerCase()==='ml').length}`);
     }
 
     if (OFFER_LIMIT > 0) {

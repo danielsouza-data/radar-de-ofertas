@@ -61,7 +61,7 @@ function lerDisparosLog() {
   } catch (e) {
     console.error('[ERR] Erro ao ler disparos-log.json:', e.message);
   }
-  return { disparos: [], totalEnviados: 0, ultimoEnvio: null };
+  return { disparos: [], totalEnviados: 0, totalEnviadosHistorico: 0, ultimoEnvio: null };
 }
 
 function lerHistorico() {
@@ -305,7 +305,7 @@ function obterMonitorRuntime() {
       ].filter(Boolean)
     },
     envios: {
-      total: Number(disparos.totalEnviados || 0),
+      total: Number(disparos.totalEnviadosHistorico || disparos.totalEnviados || 0),
       ultimo: (disparos.disparos || []).slice(-1)[0] || null
     },
     poolMercadoLivre: poolML

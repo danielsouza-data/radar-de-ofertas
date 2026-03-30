@@ -1,4 +1,30 @@
-#!/usr/bin/env node
+// Busca Mercado Livre realmente inéditas (não enviadas)
+async function buscarOfertasMercadoLivreIneditas({ quantidade = 20, palavrasChave = [], tentativas = 5, historicoOfertas = [] }) {
+  const { buscarMercadoLivre } = module.exports;
+  const ofertasIneditas = [];
+  const usados = new Set(historicoOfertas.map(o => `${o.marketplace}|${o.product_id || o.link}`));
+  const palavras = palavrasChave.length > 0 ? palavrasChave : [ML_KEYWORD, 'promoção', 'oferta', 'eletrônicos', 'casa', 'moda', 'acessórios', 'beleza', 'games', 'livros'];
+
+  for (let i = 0; i < tentativas && ofertasIneditas.length < quantidade; i++) {
+    const palavra = palavras[i % palavras.length];
+    const novas = await buscarMercadoLivre(palavra, quantidade);
+    for (const oferta of novas) {
+      const key = `${oferta.marketplace}|${oferta.product_id || oferta.link}`;
+      if (!usados.has(key)) {
+        ofertasIneditas.push(oferta);
+        usados.add(key);
+        if (ofertasIneditas.length >= quantidade) break;
+      }
+    }
+  }
+  return ofertasIneditas;
+}
+// LOG: Quantidade de ofertas ML no bucket inicial
+function logQuantidadeML(etapa, lista) {
+  const total = Array.isArray(lista) ? lista.filter(o => String(o.marketplace).toLowerCase().includes('ml') || String(o.marketplace).toLowerCase().includes('mercado livre')).length : 0;
+  console.log(`[DEBUG ML] ${etapa}: ${total} ofertas ML`);
+}
+// logQuantidadeML('Bucket inicial', listaDeOfertasML);
 /**
  * RADAR DE OFERTAS - Versão Node.js
  * Baseado na automação N8N
@@ -945,12 +971,37 @@ function intercalarOfertasPorMarketplace(ofertasLista = []) {
       }
     }
 
+    // NOVO: Se não há mais ML, mas ainda há Shopee, continue preenchendo com Shopee (mesmo repetido)
+    if (!proximoMarketplace) {
+      // Procura Shopee
+      const shopeeKey = ordemMarketplacesPriorizada.find(m => m.toLowerCase().includes('shopee'));
+      if (shopeeKey && (filas.get(shopeeKey)?.length || 0) > 0) {
+        proximoMarketplace = shopeeKey;
+      }
+    }
+
     if (!proximoMarketplace) {
       break;
     }
 
     intercaladas.push(filas.get(proximoMarketplace).shift());
     ultimoMarketplace = proximoMarketplace;
+  }
+
+  // Se ainda não atingiu o tamanho original, repete Shopee até completar
+  while (intercaladas.length < ofertasLista.length) {
+    const shopeeKey = ordemMarketplacesPriorizada.find(m => m.toLowerCase().includes('shopee'));
+    if (shopeeKey) {
+      // Procura uma oferta Shopee já usada para repetir
+      const ofertaShopee = ofertasLista.find(o => String(o.marketplace).toLowerCase().includes('shopee'));
+      if (ofertaShopee) {
+        intercaladas.push(ofertaShopee);
+      } else {
+        break;
+      }
+    } else {
+      break;
+    }
   }
 
   return intercaladas;
@@ -1022,6 +1073,7 @@ function selecionarOfertasBalanceadas(ofertasRankeadas, totalDesejado = 6) {
 }
 
 function aplicarCuradoriaQualidade(ofertasLista = []) {
+  logQuantidadeML('Antes da curadoria', ofertasLista);
   const rejeitadas = [];
   const aprovadas = [];
 
@@ -1046,6 +1098,8 @@ function aplicarCuradoriaQualidade(ofertasLista = []) {
     aprovadas.push(oferta);
   });
 
+  logQuantidadeML('Após curadoria', aprovadas);
+
   if (rejeitadas.length > 0) {
     const porMotivo = rejeitadas.reduce((acc, r) => {
       acc[r.motivo] = (acc[r.motivo] || 0) + 1;
@@ -1060,6 +1114,8 @@ function aplicarCuradoriaQualidade(ofertasLista = []) {
   return aprovadas;
 }
 
+// LOG: Após anti-spam (exemplo, ajuste conforme o local real do filtro anti-spam)
+// logQuantidadeML('Após anti-spam', listaAposAntiSpam);
 // ============ MAIN ============
 
 async function executar() {
@@ -1178,6 +1234,7 @@ async function executar() {
 // ============ EXPORT ============
 
 module.exports = {
+    buscarOfertasMercadoLivreIneditas,
   executar,
   rankearOfertas,
   calcularScore,
