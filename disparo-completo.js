@@ -954,13 +954,17 @@ client.on('ready', async () => {
     console.log('[PROCESSANDO] Buscando e rankando ofertas...\n');
     ofertas = await processarOfertas();
 
-    // Se for o primeiro ciclo após reiniciar, reenviar as 6 primeiras ofertas do dia, mesmo que já tenham sido enviadas
+
+    // Força alternância Shopee/ML no fluxo inteiro
     if (reenviarPrimeirasOfertasHoje) {
-      ofertas = ofertas.slice(0, 6); // Pega as 6 primeiras ofertas balanceadas do dia
-      console.log('[REENVIO] Reenviando as 6 primeiras ofertas do dia, ignorando filtro de já enviadas.');
+      const { intercalarOfertasPorMarketplace } = require('./src/processador-ofertas');
+      ofertas = intercalarOfertasPorMarketplace(ofertas).slice(0, 6);
+      console.log(`[REENVIO] Forçando alternância Shopee/ML nas 6 primeiras ofertas. Shopee: ${ofertas.filter(o => (o.marketplace||'').toLowerCase().includes('shopee')).length}, ML: ${ofertas.filter(o => (o.marketplace||'').toLowerCase().includes('mercado livre')||(o.marketplace||'').toLowerCase()==='ml').length}`);
       reenviarPrimeirasOfertasHoje = false;
     } else {
+      const { intercalarOfertasPorMarketplace } = require('./src/processador-ofertas');
       ofertas = filtrarOfertasNaoEnviadas(ofertas);
+      ofertas = intercalarOfertasPorMarketplace(ofertas);
     }
 
     if (OFFER_LIMIT > 0) {
