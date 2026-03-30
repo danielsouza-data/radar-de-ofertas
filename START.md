@@ -51,6 +51,7 @@ Acesso:
 - `http://localhost:3000/`
 - `http://localhost:3000/dashboard.html`
 
+
 ## 2.4 Rodar disparo oficial
 
 Modo agendado (recomendado para rotina):
@@ -63,23 +64,25 @@ Regra do agendamento:
 
 - a cada 5 minutos
 - todos os dias
-- das 09:00 ate 17:00 (America/Sao_Paulo)
+- das 09:00 até 17:00 (America/Sao_Paulo)
 - override pontual por data (somente no dia configurado):
-	- `SCHEDULE_OVERRIDE_DATE=YYYY-MM-DD`
-	- `SCHEDULE_OVERRIDE_START_HOUR=8`
-	- `SCHEDULE_OVERRIDE_END_HOUR=17`
+  - `SCHEDULE_OVERRIDE_DATE=YYYY-MM-DD`
+  - `SCHEDULE_OVERRIDE_START_HOUR=8`
+  - `SCHEDULE_OVERRIDE_END_HOUR=17`
 
-Mensagem de abertura diaria:
+Mensagem de abertura diária:
 
-- antes do primeiro envio do dia, o bot envia uma abertura com bom dia no grupo
-- a mensagem inclui CTA para o evento configurado em `OFFERS_CTA_EVENT_DATE` (ex.: `2026-04-04`)
-- controle 1x por dia por grupo em `data/daily-opening-state.json`
+- Antes do primeiro envio do dia, o bot envia uma abertura com bom dia no grupo.
+- A mensagem inclui CTA para o evento configurado em `OFFERS_CTA_EVENT_DATE` (ex.: `2026-04-04`).
+- Controle 1x por dia por grupo em `data/daily-opening-state.json`.
 
-Producao:
+Produção:
 
 ```powershell
 node disparo-completo.js
 ```
+
+> **Nota:** O sistema agora envia todas as ofertas disponíveis no lote, sem limitação de quantidade (não há mais "1/6", "2/6" etc). Para testes controlados, utilize filtros no pipeline de ofertas.
 
 Teste com 1 oferta:
 

@@ -45,12 +45,8 @@ Iniciar modo agendado (5 em 5 min, de 09h ate 17h):
 node agendador-envios.js
 ```
 
-Teste controlado com 1 oferta:
 
-```powershell
-$env:OFFER_LIMIT = '1'
-node disparo-completo.js
-```
+> **Nota:** O sistema agora processa sempre todo o lote disponível de ofertas. Para testes controlados, utilize filtros no pipeline de ofertas ou ajuste temporário no código, pois a limitação por OFFER_LIMIT foi removida.
 
 ## Arquivos principais
 
@@ -63,21 +59,24 @@ node disparo-completo.js
 - `data/disparos-log.json`: historico de disparos
 - `data/whatsapp-status.json`: estado atual da conexao do WhatsApp
 
+
 ## Regras operacionais
 
-- Usar sempre `disparo-completo.js` como fluxo oficial
-- Para rotina diaria, manter `agendador-envios.js` em execucao
-- Janela de envios automaticos: 09:00 ate 17:00, todos os dias
-- Override diario (somente para uma data especifica):
+- Use sempre `disparo-completo.js` como fluxo oficial para envio de ofertas.
+- Para rotina diária, mantenha `agendador-envios.js` em execução.
+- Janela de envios automáticos: 09:00 até 17:00, todos os dias.
+- Override diário (somente para uma data específica):
   - `SCHEDULE_OVERRIDE_DATE=YYYY-MM-DD`
   - `SCHEDULE_OVERRIDE_START_HOUR=8`
   - `SCHEDULE_OVERRIDE_END_HOUR=17`
-  - Exemplo: para aplicar apenas hoje, defina `SCHEDULE_OVERRIDE_DATE` com a data de hoje
-- Disparo pontual deve ser feito manualmente quando solicitado
-- Ofertas sem imagem sao puladas automaticamente
-- O dashboard le os logs locais e o status do WhatsApp
-- Health operacional inclui heartbeat do worker de disparo em `data/disparo-worker-health.json`
-- Control plane operacional agora roda separado em `bin/control-plane-server.js`
+  - Exemplo: para aplicar apenas hoje, defina `SCHEDULE_OVERRIDE_DATE` com a data de hoje.
+- Disparo pontual deve ser feito manualmente quando solicitado.
+- Ofertas sem imagem são puladas automaticamente.
+- O dashboard lê os logs locais e o status do WhatsApp.
+- Health operacional inclui heartbeat do worker de disparo em `data/disparo-worker-health.json`.
+- Control plane operacional roda separado em `bin/control-plane-server.js`.
+
+> **Importante:** Não há mais limitação de "primeiros 6" ou "1/6, 2/6". O sistema envia todas as ofertas disponíveis no lote, sem cortes.
 - A sessao autenticada fica salva em `.wwebjs_sessions/producao/`
 
 ## Runbook de homologacao e producao

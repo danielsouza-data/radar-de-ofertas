@@ -5,6 +5,19 @@ description: >
   Ao final, um relatório consolidado reúne todos os achados com ações priorizadas.
 
 steps:
+  - id: oauthpkce-review
+    agent: ./agents/oauthpkce.agent.md
+    label: "🔑 Análise OAuth/PKCE Mercado Livre"
+    execution: inline
+    input: |
+      Analise e corrija o fluxo de autenticação Mercado Livre (OAuth 2.0 com PKCE) do Radar de Ofertas.
+      Leia: .env, playwright-ml-auth.js, ml-exchange-token.js, arquivos PKCE temporários (ml-pkce.json, ml-auth-code.txt).
+      Valide se o redirect_uri do .env está correto e igual ao cadastrado no app Mercado Livre.
+      Execute o fluxo Playwright, capture logs e identifique onde ocorre o erro (redirect_uri, PKCE, etc).
+      Corrija problemas de leitura do .env, geração/uso de PKCE, ou automação Playwright.
+      Proponha (ou implemente) testes automatizados para o fluxo.
+      Gere relatório com diagnóstico, correção e recomendações para evitar regressão.
+    outputFile: squads/radar-review/output/oauthpkce-report.md
   - id: sre-review
     agent: ./agents/sre.agent.md
     label: "🛡️ Análise de Confiabilidade"

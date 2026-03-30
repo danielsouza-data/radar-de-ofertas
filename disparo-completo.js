@@ -1006,43 +1006,35 @@ client.on('ready', async () => {
     // Inicializar monitoramento global de ofertas enviadas neste ciclo
     global.ofertasEnviadasNesteCiclo = [];
 
+
     // Alternância Shopee/ML no lote inteiro de ofertas, sempre
     const { intercalarOfertasPorMarketplace } = require('./src/processador-ofertas');
-    if (reenviarPrimeirasOfertasHoje) {
-      ofertas = intercalarOfertasPorMarketplace(ofertas);
-      console.log(`[REENVIO] Alternância Shopee/ML aplicada ao lote inteiro. Shopee: ${ofertas.filter(o => (o.marketplace||'').toLowerCase().includes('shopee')).length}, ML: ${ofertas.filter(o => (o.marketplace||'').toLowerCase().includes('mercado livre')||(o.marketplace||'').toLowerCase()==='ml').length}`);
-      reenviarPrimeirasOfertasHoje = false;
-    } else {
-      ofertas = filtrarOfertasNaoEnviadas(ofertas);
+    ofertas = filtrarOfertasNaoEnviadas(ofertas);
 
-      // Fallback ML: se não houver ML novas, força nova busca ML e injeta no fluxo
-      const buscarNovasOfertasML = async () => {
-        const { buscarOfertasMercadoLivreIneditas } = require('./src/processador-ofertas');
-        const historico = require('./src/processador-ofertas').carregarHistorico ? require('./src/processador-ofertas').carregarHistorico() : { offers: [] };
-        let novas = await buscarOfertasMercadoLivreIneditas({ quantidade: 20, historicoOfertas: historico.offers });
-        const { autenticarLinkBuilder, gerarLinkMercadoLivre } = require('./src/processador-ofertas');
-        await autenticarLinkBuilder();
-        novas = novas.map(oferta => {
-          if ((oferta.marketplace||'').toLowerCase().includes('ml') || (oferta.marketplace||'').toLowerCase().includes('mercado livre')) {
-            oferta.link = gerarLinkMercadoLivre(oferta.product_id, oferta.product_slug, oferta.rawLink || oferta.link);
-          }
-          return oferta;
-        });
-        return novas;
-      };
-      const { garantirMLNovoNoFluxo } = require('./disparo-completo.js');
-      if (typeof garantirMLNovoNoFluxo === 'function') {
-        ofertas = await garantirMLNovoNoFluxo(ofertas, buscarNovasOfertasML);
-      }
-
-      ofertas = intercalarOfertasPorMarketplace(ofertas);
-      console.log(`[ALTERNANCIA] Shopee/ML aplicada ao lote inteiro. Shopee: ${ofertas.filter(o => (o.marketplace||'').toLowerCase().includes('shopee')).length}, ML: ${ofertas.filter(o => (o.marketplace||'').toLowerCase().includes('mercado livre')||(o.marketplace||'').toLowerCase()==='ml').length}`);
+    // Fallback ML: se não houver ML novas, força nova busca ML e injeta no fluxo
+    const buscarNovasOfertasML = async () => {
+      const { buscarOfertasMercadoLivreIneditas } = require('./src/processador-ofertas');
+      const historico = require('./src/processador-ofertas').carregarHistorico ? require('./src/processador-ofertas').carregarHistorico() : { offers: [] };
+      let novas = await buscarOfertasMercadoLivreIneditas({ quantidade: 20, historicoOfertas: historico.offers });
+      const { autenticarLinkBuilder, gerarLinkMercadoLivre } = require('./src/processador-ofertas');
+      await autenticarLinkBuilder();
+      novas = novas.map(oferta => {
+        if ((oferta.marketplace||'').toLowerCase().includes('ml') || (oferta.marketplace||'').toLowerCase().includes('mercado livre')) {
+          oferta.link = gerarLinkMercadoLivre(oferta.product_id, oferta.product_slug, oferta.rawLink || oferta.link);
+        }
+        return oferta;
+      });
+      return novas;
+    };
+    const { garantirMLNovoNoFluxo } = require('./disparo-completo.js');
+    if (typeof garantirMLNovoNoFluxo === 'function') {
+      ofertas = await garantirMLNovoNoFluxo(ofertas, buscarNovasOfertasML);
     }
 
-    if (OFFER_LIMIT > 0) {
-      ofertas = ofertas.slice(0, OFFER_LIMIT);
-      console.log(`[LIMITE] Processando apenas ${ofertas.length} oferta(s) por configuracao OFFER_LIMIT`);
-    }
+    ofertas = intercalarOfertasPorMarketplace(ofertas);
+    console.log(`[ALTERNANCIA] Shopee/ML aplicada ao lote inteiro. Shopee: ${ofertas.filter(o => (o.marketplace||'').toLowerCase().includes('shopee')).length}, ML: ${ofertas.filter(o => (o.marketplace||'').toLowerCase().includes('mercado livre')||(o.marketplace||'').toLowerCase()==='ml').length}`);
+
+    // OFFER_LIMIT removido: sempre processa todo o lote disponível
 
     if (ofertas.length === 0) {
       console.error('\n❌ Nenhuma oferta para enviar\n');

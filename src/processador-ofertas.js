@@ -673,10 +673,34 @@ async function buscarMercadoLivre(keyword = 'eletrônicos', limite = 10) {
   };
 
   try {
+    // 1. Tenta usar access token já existente do .env
+    const ML_ACCESS_TOKEN = process.env.MERCADO_LIVRE_ACCESS_TOKEN;
+    if (ML_ACCESS_TOKEN) {
+      console.log('\n[MERCADO LIVRE OAuth] Usando access token existente do .env...');
+      const response = await mlOAuthBreaker.execute(
+        () => axios.get(
+          'https://api.mercadolibre.com/sites/MLB/search',
+          {
+            params: queryParams,
+            headers: {
+              ...MERCADO_LIVRE_HEADERS,
+              'Authorization': `Bearer ${ML_ACCESS_TOKEN}`
+            },
+            timeout: 15000
+          }
+        ),
+        'buscarMercadoLivreOAuth'
+      );
+      if (response.data?.results && response.data.results.length > 0) {
+        console.log(`[OK] ${response.data.results.length} produtos encontrados (OAuth .env)`);
+        return response.data.results;
+      } else {
+        console.warn('[MERCADO LIVRE OAuth] Nenhum resultado com access token do .env. Tentando gerar novo token...');
+      }
+    }
+    // 2. Se não houver token válido, gera via client_credentials
     if (ML_CLIENT_ID && ML_CLIENT_SECRET) {
       console.log('\n[MERCADO LIVRE OAuth] Gerando token de acesso...');
-
-      // Gerar token via Client Credentials
       const tokenResponse = await axios.post(
         'https://api.mercadolibre.com/oauth/token',
         {
@@ -686,11 +710,8 @@ async function buscarMercadoLivre(keyword = 'eletrônicos', limite = 10) {
         },
         { timeout: 10000 }
       );
-
       const token = tokenResponse.data.access_token;
       console.log('[OK] Token de acesso gerado');
-
-      // Buscar com token
       const response = await mlOAuthBreaker.execute(
         () => axios.get(
           'https://api.mercadolibre.com/sites/MLB/search',
@@ -705,16 +726,14 @@ async function buscarMercadoLivre(keyword = 'eletrônicos', limite = 10) {
         ),
         'buscarMercadoLivreOAuth'
       );
-
       if (response.data?.results && response.data.results.length > 0) {
         console.log(`[OK] ${response.data.results.length} produtos encontrados (OAuth)`);
-        return mapearResultadosMercadoLivre(response.data.results);
+        return response.data.results;
       }
-
-      console.warn('[MERCADO LIVRE OAuth] API retornou vazio');
-    } else {
-      console.warn('[MERCADO LIVRE OAuth] Credenciais ausentes, tentando busca pública');
     }
+
+    // Se não conseguir, retorna vazio
+    console.warn('[MERCADO LIVRE OAuth] API retornou vazio ou credenciais ausentes, tentando busca pública');
   } catch (error) {
     if (error instanceof CircuitBreakerOpenError) {
       console.warn(`[MERCADO LIVRE OAuth] Circuit breaker aberto: ${error.message}`);
