@@ -2,6 +2,7 @@
 
 Projeto de captura e disparo de ofertas via WhatsApp com dashboard operacional local.
 
+
 ## Fluxo atual
 
 - Autenticacao da sessao WhatsApp: `autenticar-sessao.js`
@@ -9,6 +10,30 @@ Projeto de captura e disparo de ofertas via WhatsApp com dashboard operacional l
 - Agendador oficial: `agendador-envios.js`
 - Dashboard local: `bin/dashboard-server.js`
 - Pipeline de ofertas: `src/processador-ofertas.js`
+
+## Mercado Livre: Ampliação do Mapeamento de Links
+
+Para garantir que ofertas do Mercado Livre sejam exportadas com link curto válido (meli.la), é necessário manter o arquivo `mercadolivre-linkbuilder-map.txt` atualizado.
+
+### Gerar lote de produtos sem link curto para o Link Builder
+
+1. Gere um lote variado de produtos ML sem link curto:
+  ```powershell
+  node gerar-lote-linkbuilder-variado.js 100
+  ```
+  Isso criará o arquivo `ml-lote-linkbuilder-variado.txt` com até 100 códigos de produtos.
+
+2. (Opcional) Para garantir compatibilidade, converta os códigos em URLs:
+  - Formato: `https://www.mercadolivre.com.br/p/MLB12345678`
+  - Basta substituir cada linha do arquivo pelo formato acima.
+
+3. Cole os links/códigos no Link Builder do Mercado Livre para gerar os links curtos.
+
+4. Atualize o arquivo `mercadolivre-linkbuilder-map.txt` com os novos pares `código<TAB>link_curto`.
+
+5. Repita o ciclo de exportação normalmente.
+
+> **Dica:** O sistema só exporta ofertas ML com link curto válido presente no mapa. Sempre mantenha o mapeamento atualizado para ampliar a cobertura.
 
 ## Execucao recomendada no Windows
 
