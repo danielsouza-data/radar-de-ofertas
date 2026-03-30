@@ -64,6 +64,16 @@ Regra do agendamento:
 - a cada 5 minutos
 - todos os dias
 - das 09:00 ate 17:00 (America/Sao_Paulo)
+- override pontual por data (somente no dia configurado):
+	- `SCHEDULE_OVERRIDE_DATE=YYYY-MM-DD`
+	- `SCHEDULE_OVERRIDE_START_HOUR=8`
+	- `SCHEDULE_OVERRIDE_END_HOUR=17`
+
+Mensagem de abertura diaria:
+
+- antes do primeiro envio do dia, o bot envia uma abertura com bom dia no grupo
+- a mensagem inclui CTA para o evento configurado em `OFFERS_CTA_EVENT_DATE` (ex.: `2026-04-04`)
+- controle 1x por dia por grupo em `data/daily-opening-state.json`
 
 Producao:
 

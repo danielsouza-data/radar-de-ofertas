@@ -68,6 +68,11 @@ node disparo-completo.js
 - Usar sempre `disparo-completo.js` como fluxo oficial
 - Para rotina diaria, manter `agendador-envios.js` em execucao
 - Janela de envios automaticos: 09:00 ate 17:00, todos os dias
+- Override diario (somente para uma data especifica):
+  - `SCHEDULE_OVERRIDE_DATE=YYYY-MM-DD`
+  - `SCHEDULE_OVERRIDE_START_HOUR=8`
+  - `SCHEDULE_OVERRIDE_END_HOUR=17`
+  - Exemplo: para aplicar apenas hoje, defina `SCHEDULE_OVERRIDE_DATE` com a data de hoje
 - Disparo pontual deve ser feito manualmente quando solicitado
 - Ofertas sem imagem sao puladas automaticamente
 - O dashboard le os logs locais e o status do WhatsApp
@@ -125,6 +130,14 @@ node disparo-completo.js
 - `WHATSAPP_READY_HEARTBEAT_MS`: heartbeat da sessao WhatsApp pronta (padrao `60000`)
 - `WHATSAPP_SESSION_PERMISSIONS_STRICT`: `true` para bloquear startup com ACL/permissao insegura
 - `DEBUG_SHOPEE_AUTH`: `true` apenas para diagnostico local
+- `MORNING_OPENING_ENABLED`: `true` para enviar mensagem de abertura antes do primeiro envio do dia
+- `OFFERS_CTA_EVENT_DATE`: data do CTA em formato `YYYY-MM-DD` (ex.: `2026-04-04`)
+
+## Mensagem de abertura diaria
+
+- Antes do primeiro envio do dia, o disparo envia uma abertura no grupo com bom dia + CTA do evento configurado
+- Controle de envio 1x por dia por grupo em: `data/daily-opening-state.json`
+- Se precisar desativar temporariamente a abertura: `MORNING_OPENING_ENABLED=false`
 
 ## Mercado Livre
 

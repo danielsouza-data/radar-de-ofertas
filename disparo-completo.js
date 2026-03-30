@@ -66,6 +66,10 @@ const RADAR_PUBLIC_BASE_URL = String(
   process.env.RADAR_PUBLIC_BASE_URL || `http://localhost:${process.env.DASHBOARD_PORT || 3000}`
 ).trim().replace(/\/$/, '');
 const RUN_ID = `${new Date().toISOString().replace(/[-:.TZ]/g, '').slice(0, 14)}-${process.pid}`;
+const SCHED_TZ = process.env.SCHED_TZ || 'America/Sao_Paulo';
+const DAILY_OPENING_STATE_FILE = PATHS.DAILY_OPENING_STATE;
+const MORNING_OPENING_ENABLED = String(process.env.MORNING_OPENING_ENABLED || 'true').toLowerCase() !== 'false';
+const OFFERS_CTA_EVENT_DATE = String(process.env.OFFERS_CTA_EVENT_DATE || '2026-04-04').trim(); // YYYY-MM-DD
 
 const isTestContext =
   RADAR_TEST_MODE ||
@@ -118,6 +122,89 @@ function sanitizarLinkMensagem(link) {
     return u.toString();
   } catch {
     return '';
+  }
+}
+
+function obterDataNoTimezone(timeZone) {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit'
+  }).format(new Date());
+}
+
+function formatarDataBrIso(isoDate) {
+  const m = String(isoDate || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!m) return '04/04';
+  return `${m[3]}/${m[2]}`;
+}
+
+function criarMensagemAberturaDia() {
+  const dataEventoBr = formatarDataBrIso(OFFERS_CTA_EVENT_DATE);
+  return `🌞 *Bom dia, pessoal!*\n\nEstamos iniciando mais um dia de ofertas aqui no *Radar de Ofertas*! 🛒🔥\n\nFiquem ligados porque hoje teremos selecao especial durante o dia para ajudar na economia.\n\n🎯 *CTA:* o evento *${dataEventoBr}* está chegando e as plataformas costumam liberar ofertas muito fortes nessa data.\nAtive as notificacoes e acompanhe o grupo para nao perder os melhores links!`;
+}
+
+function carregarEstadoAberturaDiaria() {
+  try {
+    if (!fs.existsSync(DAILY_OPENING_STATE_FILE)) return {};
+    const raw = fs.readFileSync(DAILY_OPENING_STATE_FILE, 'utf8');
+    return JSON.parse(raw) || {};
+  } catch {
+    return {};
+  }
+}
+
+function salvarEstadoAberturaDiaria(payload) {
+  try {
+    fs.writeFileSync(DAILY_OPENING_STATE_FILE, JSON.stringify(payload, null, 2));
+  } catch (err) {
+    console.warn(`[OPENING_STATE_WARN] Falha ao salvar estado de abertura: ${err.message}`);
+  }
+}
+
+function jaEnviouAberturaHoje(channelId, diaRef) {
+  const estado = carregarEstadoAberturaDiaria();
+  return String(estado?.[channelId] || '') === diaRef;
+}
+
+function marcarAberturaEnviadaHoje(channelId, diaRef) {
+  const estado = carregarEstadoAberturaDiaria();
+  estado[channelId] = diaRef;
+  salvarEstadoAberturaDiaria(estado);
+}
+
+async function enviarMensagemAberturaSeNecessario() {
+  if (!MORNING_OPENING_ENABLED) {
+    console.log('[ABERTURA] Mensagem de abertura desativada por config (MORNING_OPENING_ENABLED=false).');
+    return;
+  }
+
+  const diaRef = obterDataNoTimezone(SCHED_TZ);
+  if (jaEnviouAberturaHoje(CHANNEL_ID, diaRef)) {
+    console.log(`[ABERTURA] Mensagem de abertura ja enviada hoje (${diaRef}).`);
+    return;
+  }
+
+  const mensagem = criarMensagemAberturaDia();
+  if (RADAR_DRY_RUN) {
+    console.log('[ABERTURA] DRY_RUN ativo: mensagem de abertura nao sera enviada.');
+    console.log(mensagem);
+    return;
+  }
+
+  try {
+    const chat = await client.getChatById(CHANNEL_ID);
+    if (!chat) {
+      console.warn('[ABERTURA] Chat nao encontrado para envio da mensagem de abertura.');
+      return;
+    }
+
+    await chat.sendMessage(mensagem);
+    marcarAberturaEnviadaHoje(CHANNEL_ID, diaRef);
+    console.log(`[ABERTURA] Mensagem inicial enviada com sucesso para o dia ${diaRef}.`);
+  } catch (err) {
+    console.warn(`[ABERTURA] Falha ao enviar mensagem inicial: ${err.message}`);
   }
 }
 
@@ -856,6 +943,8 @@ client.on('ready', async () => {
   startWhatsappHeartbeat('ready', 'Sessao conectada e pronta para envio');
 
   try {
+    await enviarMensagemAberturaSeNecessario();
+
     // Processar ofertas
     console.log('[PROCESSANDO] Buscando e rankando ofertas...\n');
     ofertas = await processarOfertas();
