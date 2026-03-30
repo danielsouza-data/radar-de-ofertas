@@ -64,6 +64,8 @@ const ML_JANELA_FIM_HORA = Math.max(0, Math.min(23, Number(process.env.ML_JANELA
 const ML_INTERVALO_MINUTOS = Math.max(1, Number(process.env.ML_INTERVALO_MINUTOS || 5));
 const CURADORIA_MIN_RATING = Math.max(0, Number(process.env.CURADORIA_MIN_RATING || 0.1));
 const CURADORIA_MIN_SALES = Math.max(0, Number(process.env.CURADORIA_MIN_SALES || 1));
+const CURADORIA_MIN_RATING_ML = Math.max(0, Number(process.env.CURADORIA_MIN_RATING_ML || 0));
+const CURADORIA_MIN_SALES_ML = Math.max(0, Number(process.env.CURADORIA_MIN_SALES_ML || 0));
 const PRIORITY_MARKETPLACE_RAW = String(process.env.RADAR_PRIORITY_MARKETPLACE || '').trim().toLowerCase();
 const PRIORITY_MARKETPLACE = PRIORITY_MARKETPLACE_RAW === 'ml' || PRIORITY_MARKETPLACE_RAW === 'mercado livre' || PRIORITY_MARKETPLACE_RAW === 'mercadolivre'
   ? 'Mercado Livre'
@@ -1026,14 +1028,18 @@ function aplicarCuradoriaQualidade(ofertasLista = []) {
   ofertasLista.forEach((oferta) => {
     const rating = Number(oferta?.rating || 0);
     const sales = Number(oferta?.sales || 0);
+    const marketplace = String(oferta?.marketplace || '').trim().toLowerCase();
+    const isMl = marketplace === 'mercado livre' || marketplace === 'ml';
+    const minRating = isMl ? CURADORIA_MIN_RATING_ML : CURADORIA_MIN_RATING;
+    const minSales = isMl ? CURADORIA_MIN_SALES_ML : CURADORIA_MIN_SALES;
 
-    if (!Number.isFinite(rating) || rating < CURADORIA_MIN_RATING) {
-      rejeitadas.push({ oferta, motivo: `rating<${CURADORIA_MIN_RATING}` });
+    if (!Number.isFinite(rating) || rating < minRating) {
+      rejeitadas.push({ oferta, motivo: `rating<${minRating}` });
       return;
     }
 
-    if (!Number.isFinite(sales) || sales < CURADORIA_MIN_SALES) {
-      rejeitadas.push({ oferta, motivo: `sales<${CURADORIA_MIN_SALES}` });
+    if (!Number.isFinite(sales) || sales < minSales) {
+      rejeitadas.push({ oferta, motivo: `sales<${minSales}` });
       return;
     }
 

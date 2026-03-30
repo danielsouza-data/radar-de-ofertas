@@ -65,6 +65,7 @@ const WHATSAPP_READY_HEARTBEAT_MS = Math.max(10000, parseEnvInt(process.env.WHAT
 const RADAR_PUBLIC_BASE_URL = String(
   process.env.RADAR_PUBLIC_BASE_URL || `http://localhost:${process.env.DASHBOARD_PORT || 3000}`
 ).trim().replace(/\/$/, '');
+const TRACKING_ENABLED = String(process.env.TRACKING_ENABLED || 'true').toLowerCase() !== 'false';
 const RUN_ID = `${new Date().toISOString().replace(/[-:.TZ]/g, '').slice(0, 14)}-${process.pid}`;
 const SCHED_TZ = process.env.SCHED_TZ || 'America/Sao_Paulo';
 const DAILY_OPENING_STATE_FILE = PATHS.DAILY_OPENING_STATE;
@@ -96,7 +97,7 @@ const AUTH_STORE_PATH = PATHS.WWEBJS_SESSIONS.replace(/[\\/]$/, '') + '/' + SESS
 console.log(`\n[SESSION] ID: ${SESSION_ID} (REUTILIZANDO)`);
 console.log(`[IMPORTANTE] Execute autenticar-sessao.js primeiro!\n`);
 console.log(`[RUN] ${RUN_ID}`);
-console.log(`[TRACKING_BASE] ${RADAR_PUBLIC_BASE_URL}`);
+console.log(`[TRACKING] ${TRACKING_ENABLED ? `ON (${RADAR_PUBLIC_BASE_URL})` : 'OFF (link original)'}`);
 
 // Formatar mensagem WhatsApp
 function sanitizarTextoMensagem(valor, maxLen = 160) {
@@ -836,7 +837,7 @@ async function enviarProxima() {
     const tracking = createTrackedOfferLink({
       offer: oferta,
       runId: RUN_ID,
-      publicBaseUrl: RADAR_PUBLIC_BASE_URL
+      publicBaseUrl: TRACKING_ENABLED ? RADAR_PUBLIC_BASE_URL : ''
     });
     oferta.tracking_link = tracking.trackingUrl;
     oferta.trackingToken = tracking.trackingToken;
@@ -931,6 +932,10 @@ async function enviarProxima() {
   }
 }
 
+
+// Flag para garantir reenvio dos 6 primeiros links ao reiniciar
+let reenviarPrimeirasOfertasHoje = true;
+
 client.on('ready', async () => {
   if (cicloIniciado) {
     console.warn('[WARN] Client "ready" disparado novamente — ignorando reentrada');
@@ -948,7 +953,15 @@ client.on('ready', async () => {
     // Processar ofertas
     console.log('[PROCESSANDO] Buscando e rankando ofertas...\n');
     ofertas = await processarOfertas();
-    ofertas = filtrarOfertasNaoEnviadas(ofertas);
+
+    // Se for o primeiro ciclo após reiniciar, reenviar as 6 primeiras ofertas do dia, mesmo que já tenham sido enviadas
+    if (reenviarPrimeirasOfertasHoje) {
+      ofertas = ofertas.slice(0, 6); // Pega as 6 primeiras ofertas balanceadas do dia
+      console.log('[REENVIO] Reenviando as 6 primeiras ofertas do dia, ignorando filtro de já enviadas.');
+      reenviarPrimeirasOfertasHoje = false;
+    } else {
+      ofertas = filtrarOfertasNaoEnviadas(ofertas);
+    }
 
     if (OFFER_LIMIT > 0) {
       ofertas = ofertas.slice(0, OFFER_LIMIT);

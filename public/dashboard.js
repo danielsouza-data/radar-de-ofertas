@@ -83,13 +83,12 @@ async function carregarDados() {
   contadorProxima = 15;
 
   try {
-    const [resOfertas, resStats, resWhatsapp, resHealth, resPool, resTracking] = await Promise.all([
+    const [resOfertas, resStats, resWhatsapp, resHealth, resPool] = await Promise.all([
       fetch('/api/ofertas/enviadas'),
       fetch('/api/stats'),
       fetch('/api/whatsapp-status'),
       fetch('/api/healthcheck'),
-      fetch('/api/link-pool-status'),
-      fetch('/api/tracking-stats')
+      fetch('/api/link-pool-status')
     ]);
 
     if (!resOfertas.ok || !resStats.ok || !resWhatsapp.ok) throw new Error('Falha na API');
@@ -99,14 +98,12 @@ async function carregarDados() {
     const dadosWhatsapp = await resWhatsapp.json();
     const dadosHealth = resHealth.ok ? await resHealth.json() : null;
     const poolPayload = resPool.ok ? await resPool.json() : null;
-    const trackingPayload = resTracking.ok ? await resTracking.json() : null;
 
     renderStats(dadosStats, dadosOfertas);
     renderTabela(dadosOfertas.ofertas || []);
     renderWhatsappStatus(dadosWhatsapp);
     renderAlertas(dadosHealth);
     renderPoolStatus(poolPayload || dadosHealth?.poolMercadoLivre || null);
-    renderTracking(trackingPayload || dadosStats?.tracking || null);
 
     const el = document.getElementById('refresh-status');
     if (el) el.textContent = `Atualizado às ${new Date().toLocaleTimeString('pt-BR')}`;
@@ -169,39 +166,6 @@ function renderPoolStatus(pool) {
   msgEl.textContent = `Cobertura adequada para o dia. Disponiveis agora: ${disponiveis}/${totalPool}. Fonte: ${pool.fonte || 'arquivo'}.`;
 }
 
-function renderTracking(tracking) {
-  const clicksEl = document.getElementById('stat-clicks');
-  const ctrEl = document.getElementById('stat-ctr');
-  const summaryEl = document.getElementById('tracking-summary');
-  if (!clicksEl || !ctrEl || !summaryEl) return;
-
-  if (!tracking || !tracking.trackingEnabled) {
-    clicksEl.textContent = '0';
-    ctrEl.textContent = 'off';
-    summaryEl.innerHTML = '<article class="monitor-process-item"><p>Tracking desativado. Defina RADAR_PUBLIC_BASE_URL para gerar links rastreáveis.</p></article>';
-    return;
-  }
-
-  clicksEl.textContent = String(tracking.uniqueClicks ?? 0);
-  ctrEl.textContent = `${Number(tracking.ctr || 0).toFixed(2)}%`;
-
-  const campanhas = Array.isArray(tracking.topCampaigns) ? tracking.topCampaigns : [];
-  if (campanhas.length === 0) {
-    summaryEl.innerHTML = '<article class="monitor-process-item"><p>Sem campanhas clicadas ainda.</p></article>';
-    return;
-  }
-
-  summaryEl.innerHTML = campanhas.map((item) => `
-    <article class="monitor-process-item">
-      <div class="monitor-process-head">
-        <strong>${escapeHtml(item.category || 'geral')} · ${escapeHtml(item.marketplace || 'geral')}</strong>
-        <span class="monitor-state monitor-state-ok">CTR ${Number(item.ctr || 0).toFixed(2)}%</span>
-      </div>
-      <p>${escapeHtml(item.campaignId || 'sem-campanha')} | envios ${item.sends} | cliques ${item.uniqueClicks}</p>
-    </article>
-  `).join('');
-}
-
 function renderWhatsappStatus(wa) {
   const status = String(wa?.status || 'unknown');
   const detail = String(wa?.detail || 'Sem detalhe');
@@ -262,8 +226,6 @@ function renderStats(stats, dadosOfertas) {
   document.getElementById('stat-comissao').textContent = stats.comissao_media ? stats.comissao_media + '%' : '—';
   document.getElementById('stat-preco').textContent    = stats.preco_medio ? 'R$ ' + Number(stats.preco_medio).toLocaleString('pt-BR', {minimumFractionDigits:2}) : '—';
   document.getElementById('stat-24h').textContent      = stats.ultimas_24h ?? '—';
-  document.getElementById('stat-clicks').textContent   = String(stats.tracking?.uniqueClicks ?? 0);
-  document.getElementById('stat-ctr').textContent      = stats.tracking?.trackingEnabled ? `${Number(stats.tracking.ctr || 0).toFixed(2)}%` : 'off';
 
   // Último envio vem do dashboard endpoint
   const ofertas = dadosOfertas.ofertas || [];
