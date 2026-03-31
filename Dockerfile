@@ -1,63 +1,42 @@
-# Build stage - preparar dependências
+# Ajuste forçado para garantir build limpo no workflow (2026)
+
+# Dockerfile otimizado para Radar de Ofertas (2026)
 FROM node:20-alpine AS builder
 
 WORKDIR /app
 
-# Copiar apenas package.json primeiro para melhor cache
-COPY package*.json ./
-
 # Instalar dependências
-RUN npm ci --omit=dev && \
-    npm cache clean --force
+COPY package*.json ./
+RUN npm ci --omit=dev && npm cache clean --force
 
-# Runtime stage - imagem final
 FROM node:20-alpine
-
 WORKDIR /app
 
-# Metadados
 LABEL maintainer="comercial.danielsantos@gmail.com"
-LABEL description="Radar de Ofertas - Agregador inteligente de ofertas com WhatsApp"
-LABEL version="1.0"
+LABEL description="Radar de Ofertas - Multi-marketplace enxuto"
+LABEL version="2.0"
 
-# Copiar node_modules do builder
+# Copiar dependências e app
 COPY --from=builder /app/node_modules ./node_modules
-
-# Copiar aplicação e artefatos necessários
 COPY package*.json ./
 COPY .env.example ./
-COPY bin/ ./bin/
 COPY public/ ./public/
 COPY src/ ./src/
-COPY scripts/ ./scripts/
-COPY autenticar-sessao.js ./
-COPY agendador-envios.js ./
-COPY disparo-completo.js ./
-COPY mercadolivre-linkbuilder-links.txt ./
-COPY mercadolivre-linkbuilder-map.txt ./
+COPY data/ ./data/
+COPY logs/ ./logs/
+COPY ml-cookies.json ./
+COPY ml-access-token.json ./
+COPY ml-linkbuilder.js ./
 
-# Criar diretório de logs e dados
-RUN mkdir -p /app/data /app/logs && \
-    chmod -R 755 /app
-
-# Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD node -e "require('http').get('http://localhost:3000/api/healthcheck', (r) => process.exit(r.statusCode === 200 ? 0 : 1))" || exit 1
-
-# Expor porta do dashboard
-EXPOSE 3000
+# Criar diretórios persistentes
+RUN mkdir -p /app/data /app/logs && chmod -R 755 /app
 
 # Variáveis de ambiente padrão
 ENV NODE_ENV=production
 ENV NODE_OPTIONS="--no-deprecation"
-ENV PORT=3000
 
-# Volume para dados persistentes
+# Volumes para persistência
 VOLUME ["/app/data", "/app/logs"]
 
-# Comando padrão: iniciar dashboard
-CMD ["node", "bin/dashboard-server.js"]
-
-# Alternativas de comando (descomentar conforme necessário):
-# CMD ["node", "disparo-completo.js"]
-# CMD ["node", "agendador-envios.js"]
+# Comando padrão: executar pipeline principal
+CMD ["node", "src/processador-ofertas.js"]
