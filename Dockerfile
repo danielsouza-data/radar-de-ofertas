@@ -23,7 +23,6 @@ COPY .env.example ./
 COPY public/ ./public/
 COPY src/ ./src/
 COPY data/ ./data/
-COPY logs/ ./logs/
 COPY ml-cookies.json ./
 COPY ml-access-token.json ./
 COPY ml-linkbuilder.js ./
