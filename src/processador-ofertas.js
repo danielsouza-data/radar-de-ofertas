@@ -1258,23 +1258,30 @@ function aplicarCuradoriaQualidade(ofertasLista = []) {
 
 // LOG: Após anti-spam (exemplo, ajuste conforme o local real do filtro anti-spam)
 // logQuantidadeML('Após anti-spam', listaAposAntiSpam);
-// ============ MAIN ============
+
+// ============ MAIN MULTIMARKETPLACE ============
+const { buscarOfertasML, gerarLinkAfiliadoML } = require('./marketplaces/ml');
+const { buscarOfertasAmazon, gerarLinkAfiliadoAmazon } = require('./marketplaces/amazon');
 
 async function executar() {
   try {
-    console.log('\n[INICIANDO] Ciclo de busca e envio de ofertas\n');
+    console.log('\n[INICIANDO] Ciclo de busca e envio de ofertas (multi-marketplace)\n');
     const dryRunMode = ['1', 'true', 'yes', 'sim'].includes(String(process.env.RADAR_DRY_RUN || '').toLowerCase());
     const bypassAntiSpam = dryRunMode && ['1', 'true', 'yes', 'sim'].includes(String(process.env.RADAR_BYPASS_ANTISPAM || '').toLowerCase());
     const totalDisparos = Math.max(2, Number(process.env.RADAR_TOP_N || 6));
     const onlyMarketplaceRaw = String(process.env.RADAR_ONLY_MARKETPLACE || '').trim().toLowerCase();
-    const onlyMarketplace = onlyMarketplaceRaw === 'ml' || onlyMarketplaceRaw === 'mercado livre' || onlyMarketplaceRaw === 'mercadolivre'
-      ? 'Mercado Livre'
-      : (onlyMarketplaceRaw === 'shopee' ? 'Shopee' : '');
+    let onlyMarketplace = '';
+    if (onlyMarketplaceRaw === 'ml' || onlyMarketplaceRaw === 'mercado livre' || onlyMarketplaceRaw === 'mercadolivre') {
+      onlyMarketplace = 'Mercado Livre';
+    } else if (onlyMarketplaceRaw === 'shopee') {
+      onlyMarketplace = 'Shopee';
+    } else if (onlyMarketplaceRaw === 'amazon') {
+      onlyMarketplace = 'Amazon';
+    }
 
     if (dryRunMode) {
       console.log('[MODO] Dry-run habilitado');
     }
-
     if (bypassAntiSpam) {
       console.log('[MODO] Bypass anti-spam habilitado apenas para homologacao');
     }
@@ -1283,88 +1290,87 @@ async function executar() {
     const historico = carregarHistorico();
     console.log(`[HISTÓRICO] ${historico.offers.length} ofertas registradas`);
 
-
-    // 2. Buscar produtos (Shopee + Mercado Livre + Página Oficial)
+    // 2. Buscar produtos de todos os marketplaces
     const produtosShopee = await buscarShopeeGraphQL(15);
-    const produtosMLApi = await buscarMercadoLivre(ML_KEYWORD, 15);
-    let produtosMLPagina = [];
+    const produtosML = await buscarOfertasML();
+    const produtosAmazon = await buscarOfertasAmazon();
+
+    // 3. Gerar links de afiliado para ML e Amazon
+    // (Exemplo: cookies e csrfToken devem ser carregados de arquivo/config)
+    let cookies = '';
+    let csrfToken = '';
     try {
-      produtosMLPagina = await module.exports.buscarOfertasPaginaOficialML(15);
+      if (fs.existsSync('ml-cookies.json')) {
+        const cookiesJson = JSON.parse(fs.readFileSync('ml-cookies.json', 'utf8'));
+        cookies = cookiesJson.cookies || cookiesJson;
+        csrfToken = cookiesJson.csrfToken || '';
+      }
     } catch (e) {
-      console.warn('[ML-OFERTAS] Falha ao buscar ofertas da página oficial:', e.message);
+      console.warn('[ML] Falha ao carregar cookies/csrf:', e.message);
     }
 
-    // Mesclar ofertas ML (API + Página)
-    const produtosML = [...produtosMLApi];
-    if (Array.isArray(produtosMLPagina) && produtosMLPagina.length > 0) {
-      // Evitar duplicatas por product_id ou link
-      const idsExistentes = new Set(produtosML.map(o => o.product_id || o.raw_link));
-      produtosMLPagina.forEach(o => {
-        const key = o.product_id || o.raw_link;
-        if (key && !idsExistentes.has(key)) {
-          produtosML.push(o);
-          idsExistentes.add(key);
-        }
-      });
-      console.log(`[MERCADO LIVRE] ${produtosMLPagina.length} ofertas adicionadas da página oficial.`);
+    for (const oferta of produtosML) {
+      try {
+        const res = await gerarLinkAfiliadoML(oferta.raw_link, cookies, csrfToken);
+        oferta.link = res?.links?.[0]?.shortUrl || oferta.raw_link;
+      } catch (e) {
+        oferta.link = oferta.raw_link;
+        oferta.linkbuilder_error = e.message;
+        fs.appendFileSync('logs/ml-linkbuilder-errors.log', `[${new Date().toISOString()}] ${e.message} | ${oferta.raw_link}\n`);
+      }
     }
 
-    console.log(`[SHOPEE] ${produtosShopee.length} ofertas encontradas`);
-    console.log(`[MERCADO LIVRE] ${produtosML.length} produtos encontrados (API + Página Oficial)`);
+    // Amazon: gere links de afiliado usando sua tag
+    const amazonTag = process.env.AMAZON_ASSOCIATE_TAG || '';
+    for (const oferta of produtosAmazon) {
+      try {
+        oferta.link = gerarLinkAfiliadoAmazon(oferta.raw_link, amazonTag);
+      } catch (e) {
+        oferta.link = oferta.raw_link;
+        oferta.linkbuilder_error = e.message;
+        fs.appendFileSync('logs/amazon-linkbuilder-errors.log', `[${new Date().toISOString()}] ${e.message} | ${oferta.raw_link}\n`);
+      }
+    }
 
-    // 3. Normalizar
-    const linksOficiaisMl = obterLinksMercadoLivreOficiais(produtosML.length);
-    let ofertas = normalizarOfertas(produtosShopee, produtosML, {
-      mlLinkBuilderLinks: linksOficiaisMl,
-      requireMlShortLink: ML_LINKBUILDER_REQUIRE_SHORT,
-      strictMlShortMatch: ML_LINKBUILDER_STRICT_MATCH
-    });
-
+    // 4. Normalizar e juntar todas as ofertas
+    let ofertas = normalizarOfertas(produtosShopee, produtosML.concat(produtosAmazon), {});
     if (onlyMarketplace) {
       ofertas = ofertas.filter((o) => o.marketplace === onlyMarketplace);
       console.log(`[FILTRO] RADAR_ONLY_MARKETPLACE=${onlyMarketplace} aplicado`);
     }
-
     ofertas = aplicarCuradoriaQualidade(ofertas);
-
     console.log(`[NORMALIZADO] ${ofertas.length} ofertas`);
 
-    // 4. Filtrar duplicatas (anti-spam)
+    // 5. Filtrar duplicatas (anti-spam)
     const ofertasNovas = bypassAntiSpam
       ? ofertas
       : ofertas.filter(o => !verificarDuplicacao(o, historico));
-
     if (bypassAntiSpam) {
       console.log(`[ANTI-SPAM] bypass ativo em dry-run: ${ofertasNovas.length} ofertas consideradas`);
     } else {
       console.log(`[ANTI-SPAM] ${ofertasNovas.length} ofertas novas (${ofertas.length - ofertasNovas.length} duplicadas)`);
     }
-
     if (ofertasNovas.length === 0) {
       console.log('\n⚠️ Nenhuma oferta nova encontrada. Encerrando.\n');
       process.exit(0);
     }
 
-    // 5. Ranking
+    // 6. Ranking
     const ofertasRankeadas = rankearOfertas(ofertasNovas);
-
-    // 6. Selecionar ofertas balanceadas entre marketplaces
+    // 7. Selecionar ofertas balanceadas entre marketplaces
     const selecionadas = selecionarOfertasBalanceadas(ofertasRankeadas, totalDisparos);
     const distribuicao = selecionadas.reduce((acc, o) => {
       acc[o.marketplace] = (acc[o.marketplace] || 0) + 1;
       return acc;
     }, {});
-
     console.log(`\n[TOP ${selecionadas.length} BALANCEADAS]\n`);
     console.log(`[DISTRIBUICAO] ${Object.entries(distribuicao).map(([k, v]) => `${k}: ${v}`).join(' | ')}`);
-
     selecionadas.forEach((o, i) => {
       console.log(`[${i + 1}] ${o.product_name} (${o.marketplace})`);
       console.log(`    Preço: R$ ${o.price.toFixed(2)} | Desconto: ${o.discount}%`);
       console.log(`    Score: ${o.score.toFixed(1)}\n`);
     });
-
-    // 7. Atualizar histórico (somente fora de dry-run)
+    // 8. Atualizar histórico (somente fora de dry-run)
     if (!dryRunMode) {
       selecionadas.forEach(o => {
         historico.offers.push({
@@ -1375,20 +1381,16 @@ async function executar() {
           timestamp: Date.now()
         });
       });
-
       historico.lastUpdate = new Date().toISOString();
       salvarHistorico(historico);
     } else {
       console.log('[DRY-RUN] Historico nao foi alterado');
     }
-
-    // 8. Exibir resultado
+    // 9. Exibir resultado
     console.log('='.repeat(70));
     console.log(`✅ PRONTO PARA ENVIAR: ${selecionadas.length} ofertas\n`);
-
     // Retornar para uso externo
     return selecionadas;
-
   } catch (error) {
     console.error(`\n[FATAL] ${error.message}\n`);
     process.exit(1);
