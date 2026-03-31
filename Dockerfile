@@ -22,7 +22,6 @@ COPY package*.json ./
 COPY .env.example ./
 COPY public/ ./public/
 COPY src/ ./src/
-COPY data/ ./data/
 COPY ml-cookies.json ./
 COPY ml-access-token.json ./
 COPY ml-linkbuilder.js ./
