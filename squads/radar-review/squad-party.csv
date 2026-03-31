@@ -1,9 +1,0 @@
-path,displayName,icon,role
-./agents/sre.agent.md,Engenheiro de Confiabilidade,🛡️,SRE
-./agents/security.agent.md,Especialista em Segurança,🔐,Security
-./agents/oauth-pkce.agent.md,Agente OAuth/PKCE,🔑,OAuth
-./agents/product.agent.md,Estrategista de Produto,🚀,Product
-./agents/architect.agent.md,Arquiteto de Software,🏗️,Architect
-./agents/ml-api.agent.md,Especialista em Integração ML,🔗,ML-API
-./agents/etl.agent.md,Especialista em Dados/ETL,🗄️,ETL
-./agents/testes.agent.md,Especialista em Testes Automatizados,🧪,QA-Auto

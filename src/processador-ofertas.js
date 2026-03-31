@@ -1,51 +1,36 @@
-// Scraping de ofertas da página oficial do Mercado Livre
-async function buscarOfertasPaginaOficialML(limite = 20) {
-  const url = 'https://www.mercadolivre.com.br/ofertas';
-  try {
-    console.log('[ML-OFERTAS] Buscando ofertas da página oficial...');
-    const response = await axios.get(url, {
-      timeout: 20000,
-      headers: {
-        'User-Agent': 'Mozilla/5.0',
-        'Accept-Language': 'pt-BR,pt;q=0.9'
-      }
-    });
-    const $ = cheerio.load(response.data);
-    const ofertas = [];
-    // Seletores baseados na estrutura atual da página de ofertas ML
-    $('.promotion-item, .promotion-item__container').each((i, el) => {
-      if (ofertas.length >= limite) return false;
-      const node = $(el);
-      const link = node.find('a').attr('href');
-      const nome = node.find('.promotion-item__title, .promotion-item__title--highlight').text().trim();
-      const precoAtual = node.find('.andes-money-amount__fraction').first().text().replace(/\D/g, '');
-      const centavos = node.find('.andes-money-amount__cents').first().text().replace(/\D/g, '');
-      const preco = Number(precoAtual + (centavos ? '.' + centavos : ''));
-      const precoOriginal = node.find('.andes-money-amount--previous .andes-money-amount__fraction').first().text().replace(/\D/g, '');
-      const imagem = node.find('img').attr('src') || node.find('img').attr('data-src') || '';
-      if (!link || !nome || !preco) return;
-      // Extrair product_id se possível
-      let product_id = '';
-      const m = String(link).match(/\/MLB-(\d+)-/i);
-      if (m && m[1]) product_id = 'MLB' + m[1];
-      ofertas.push({
-        marketplace: 'Mercado Livre',
-        product_id,
-        product_name: nome,
-        price: preco,
-        original_price: precoOriginal ? Number(precoOriginal) : preco,
-        discount: precoOriginal && Number(precoOriginal) > preco ? Math.round(((Number(precoOriginal) - preco) / Number(precoOriginal)) * 100) : 0,
-        rating: 4.5,
-        sales: null,
-        raw_link: link,
-        image_url: imagem
-      });
-    });
-    console.log(`[ML-OFERTAS] ${ofertas.length} ofertas extraídas da página oficial.`);
-    return ofertas;
-  } catch (err) {
-    console.warn('[ML-OFERTAS] Erro ao capturar ofertas da página oficial:', err.message);
-    return [];
+
+// === DRIVERS DE MARKETPLACE ===
+const { buscarOfertasML, gerarLinkAfiliadoML } = require('./marketplaces/ml');
+const { buscarOfertasAmazon, gerarLinkAfiliadoAmazon } = require('./marketplaces/amazon');
+const { buscarOfertasShopee, gerarLinkAfiliadoShopee } = require('./marketplaces/shopee');
+
+async function buscarOfertasMarketplace(marketplace, opts = {}) {
+  switch (marketplace.toLowerCase()) {
+    case 'mercado livre':
+    case 'ml':
+    case 'mercadolivre':
+      return await buscarOfertasML(opts);
+    case 'amazon':
+      return await buscarOfertasAmazon(opts);
+    case 'shopee':
+      return await buscarOfertasShopee(opts);
+    default:
+      throw new Error('Marketplace não suportado: ' + marketplace);
+  }
+}
+
+async function gerarLinkAfiliadoMarketplace(marketplace, oferta, auth = {}) {
+  switch (marketplace.toLowerCase()) {
+    case 'mercado livre':
+    case 'ml':
+    case 'mercadolivre':
+      return await gerarLinkAfiliadoML(oferta.raw_link, auth.cookies, auth.csrfToken);
+    case 'amazon':
+      return gerarLinkAfiliadoAmazon(oferta.raw_link, auth.tagAfiliado);
+    case 'shopee':
+      return gerarLinkAfiliadoShopee(oferta.raw_link, auth.tagAfiliado);
+    default:
+      throw new Error('Marketplace não suportado: ' + marketplace);
   }
 }
 
@@ -1259,9 +1244,7 @@ function aplicarCuradoriaQualidade(ofertasLista = []) {
 // LOG: Após anti-spam (exemplo, ajuste conforme o local real do filtro anti-spam)
 // logQuantidadeML('Após anti-spam', listaAposAntiSpam);
 
-// ============ MAIN MULTIMARKETPLACE ============
-const { buscarOfertasML, gerarLinkAfiliadoML } = require('./marketplaces/ml');
-const { buscarOfertasAmazon, gerarLinkAfiliadoAmazon } = require('./marketplaces/amazon');
+
 
 async function executar() {
   try {
@@ -1400,8 +1383,7 @@ async function executar() {
 // ============ EXPORT ============
 
 module.exports = {
-    buscarOfertasMercadoLivreIneditas,
-  buscarOfertasPaginaOficialML,
+  buscarOfertasMercadoLivreIneditas,
   executar,
   rankearOfertas,
   calcularScore,
