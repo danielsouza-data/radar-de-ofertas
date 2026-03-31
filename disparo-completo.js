@@ -198,23 +198,13 @@ function marcarAberturaEnviadaHoje(channelId, diaRef) {
 }
 
 async function enviarMensagemAberturaSeNecessario() {
-  if (!MORNING_OPENING_ENABLED) {
-    console.log('[ABERTURA] Mensagem de abertura desativada por config (MORNING_OPENING_ENABLED=false).');
-    return;
-  }
+  if (!MORNING_OPENING_ENABLED) return;
 
   const diaRef = obterDataNoTimezone(SCHED_TZ);
-  if (jaEnviouAberturaHoje(CHANNEL_ID, diaRef)) {
-    console.log(`[ABERTURA] Mensagem de abertura ja enviada hoje (${diaRef}).`);
-    return;
-  }
+  if (jaEnviouAberturaHoje(CHANNEL_ID, diaRef)) return;
 
   const mensagem = criarMensagemAberturaDia();
-  if (RADAR_DRY_RUN) {
-    console.log('[ABERTURA] DRY_RUN ativo: mensagem de abertura nao sera enviada.');
-    console.log(mensagem);
-    return;
-  }
+  if (RADAR_DRY_RUN) return;
 
   try {
     const chat = await client.getChatById(CHANNEL_ID);
@@ -252,7 +242,7 @@ function formatarMensagem(oferta, numero, total) {
     ? `🔥 ${descontoNumero}% OFF\nDe: ~~R$ ${precoOriginal}~~\nPor: 💰 *R$ ${precoAtual}*`
     : `Por: 💰 *R$ ${precoAtual}*`;
 
-  return `🛒 *Radar de Ofertas*
+  let mensagem = `🛒 *Radar de Ofertas*
 
 ${nomeProduto}
 🏪 ${marketplace}
@@ -262,6 +252,16 @@ ${blocoPreco}
 ${rating}
 
 🔗 ${linkSeguro || 'Link indisponivel no momento'}`;
+
+  // Shopee coupon injection (static example)
+  if (String(oferta.marketplace).toLowerCase().includes('shopee')) {
+    // Ajuste o texto/código do cupom conforme necessário
+    const cupomShopee = 'CUPOMSHOPEE10'; // Exemplo de cupom
+    const validade = 'válido até 31/03'; // Ajuste conforme necessário
+    mensagem += `\n\n🎁 *Cupom Shopee disponível!*\nUse o código: *${cupomShopee}* (${validade})`;
+  }
+
+  return mensagem;
 }
 
 // Cliente WhatsApp - com store customizado

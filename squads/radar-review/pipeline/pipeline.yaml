@@ -18,6 +18,42 @@ steps:
       Proponha (ou implemente) testes automatizados para o fluxo.
       Gere relatório com diagnóstico, correção e recomendações para evitar regressão.
     outputFile: squads/radar-review/output/oauthpkce-report.md
+
+  - id: ml-api-review
+    agent: ./agents/ml-api.agent.md
+    label: "🔗 Análise de Integração API Mercado Livre"
+    execution: inline
+    input: |
+      Analise a integração com as APIs REST do Mercado Livre.
+      Leia: src/apis/mercadoLivre.js, ml-exchange-token.js, playwright-ml-auth.js.
+      Avalie autenticação, limites de requisição, tratamento de erros, versionamento e aderência à documentação oficial.
+      Sugira melhorias e implemente exemplos de código robusto.
+      Gere relatório técnico detalhado.
+    outputFile: squads/radar-review/output/ml-api-report.md
+
+  - id: etl-review
+    agent: ./agents/etl.agent.md
+    label: "🗄️ Análise de Dados/ETL"
+    execution: inline
+    input: |
+      Analise o pipeline de dados vindos do Mercado Livre.
+      Leia: src/ e arquivos de processamento de ofertas.
+      Avalie extração, transformação, validação, deduplicação e enriquecimento dos dados.
+      Sugira e implemente validações e melhorias.
+      Gere relatório detalhado de qualidade de dados.
+    outputFile: squads/radar-review/output/etl-report.md
+
+  - id: qa-auto-review
+    agent: ./agents/testes.agent.md
+    label: "🧪 Análise de Testes Automatizados"
+    execution: inline
+    input: |
+      Analise a cobertura de testes automatizados para integrações Mercado Livre e Radar de Ofertas.
+      Leia: src/, testes existentes e scripts de integração ML.
+      Avalie cobertura, pontos cegos e cenários não cobertos.
+      Sugira e implemente novos testes automatizados.
+      Gere relatório de cobertura e recomendações.
+    outputFile: squads/radar-review/output/qa-auto-report.md
   - id: sre-review
     agent: ./agents/sre.agent.md
     label: "🛡️ Análise de Confiabilidade"

@@ -1,3 +1,54 @@
+// Scraping de ofertas da página oficial do Mercado Livre
+async function buscarOfertasPaginaOficialML(limite = 20) {
+  const url = 'https://www.mercadolivre.com.br/ofertas';
+  try {
+    console.log('[ML-OFERTAS] Buscando ofertas da página oficial...');
+    const response = await axios.get(url, {
+      timeout: 20000,
+      headers: {
+        'User-Agent': 'Mozilla/5.0',
+        'Accept-Language': 'pt-BR,pt;q=0.9'
+      }
+    });
+    const $ = cheerio.load(response.data);
+    const ofertas = [];
+    // Seletores baseados na estrutura atual da página de ofertas ML
+    $('.promotion-item, .promotion-item__container').each((i, el) => {
+      if (ofertas.length >= limite) return false;
+      const node = $(el);
+      const link = node.find('a').attr('href');
+      const nome = node.find('.promotion-item__title, .promotion-item__title--highlight').text().trim();
+      const precoAtual = node.find('.andes-money-amount__fraction').first().text().replace(/\D/g, '');
+      const centavos = node.find('.andes-money-amount__cents').first().text().replace(/\D/g, '');
+      const preco = Number(precoAtual + (centavos ? '.' + centavos : ''));
+      const precoOriginal = node.find('.andes-money-amount--previous .andes-money-amount__fraction').first().text().replace(/\D/g, '');
+      const imagem = node.find('img').attr('src') || node.find('img').attr('data-src') || '';
+      if (!link || !nome || !preco) return;
+      // Extrair product_id se possível
+      let product_id = '';
+      const m = String(link).match(/\/MLB-(\d+)-/i);
+      if (m && m[1]) product_id = 'MLB' + m[1];
+      ofertas.push({
+        marketplace: 'Mercado Livre',
+        product_id,
+        product_name: nome,
+        price: preco,
+        original_price: precoOriginal ? Number(precoOriginal) : preco,
+        discount: precoOriginal && Number(precoOriginal) > preco ? Math.round(((Number(precoOriginal) - preco) / Number(precoOriginal)) * 100) : 0,
+        rating: 4.5,
+        sales: null,
+        raw_link: link,
+        image_url: imagem
+      });
+    });
+    console.log(`[ML-OFERTAS] ${ofertas.length} ofertas extraídas da página oficial.`);
+    return ofertas;
+  } catch (err) {
+    console.warn('[ML-OFERTAS] Erro ao capturar ofertas da página oficial:', err.message);
+    return [];
+  }
+}
+
 // Busca Mercado Livre realmente inéditas (não enviadas)
 async function buscarOfertasMercadoLivreIneditas({ quantidade = 20, palavrasChave = [], tentativas = 5, historicoOfertas = [] }) {
   const { buscarMercadoLivre } = module.exports;
@@ -39,6 +90,20 @@ function logQuantidadeML(etapa, lista) {
  */
 
 const axios = require('axios');
+const Joi = require('joi');
+// Schema de validação para ofertas Mercado Livre
+const ofertaMlSchema = Joi.object({
+  marketplace: Joi.string().valid('Mercado Livre').required(),
+  product_id: Joi.string().required(),
+  product_name: Joi.string().required(),
+  slug: Joi.string().required(),
+  price: Joi.number().min(0).required(),
+  original_price: Joi.number().min(0).required(),
+  rating: Joi.number().min(0).max(5).required(),
+  sales: Joi.number().min(0).allow(null),
+  raw_link: Joi.string().uri().allow(''),
+  image_url: Joi.string().allow(''),
+});
 const crypto = require('crypto');
 const cheerio = require('cheerio');
 const fs = require('fs');
@@ -671,6 +736,45 @@ async function buscarMercadoLivre(keyword = 'eletrônicos', limite = 10) {
     limit: limite,
     offset: Math.floor(Math.random() * 100)
   };
+  const API_BASE_URL = 'https://api.mercadolibre.com';
+  const API_VERSION = 'v1'; // Versionamento explícito
+  const SEARCH_ENDPOINT = `/sites/MLB/search`;
+  const MAX_RETRIES = 3;
+  const RETRY_BASE_DELAY = 2000;
+
+
+  async function requestWithRetries(config, label) {
+    let attempt = 0;
+    while (attempt < MAX_RETRIES) {
+      try {
+        const response = await axios(config);
+        // Tratamento de rate limit
+        if (response.status === 429) {
+          const retryAfter = Number(response.headers['retry-after'] || 2);
+          console.warn(`[ML-API] Rate limit atingido. Aguardando ${retryAfter}s antes de tentar novamente...`);
+          await new Promise(res => setTimeout(res, retryAfter * 1000));
+          attempt++;
+          continue;
+        }
+        return response;
+      } catch (error) {
+        if (error.response && error.response.status === 429) {
+          const retryAfter = Number(error.response.headers['retry-after'] || 2);
+          console.warn(`[ML-API] Rate limit atingido. Aguardando ${retryAfter}s antes de tentar novamente...`);
+          await new Promise(res => setTimeout(res, retryAfter * 1000));
+          attempt++;
+        } else {
+          // Log detalhado de falha
+          console.warn(`[ML-API] Falha na requisição (${label}): ${error.message}`);
+          if (attempt < MAX_RETRIES - 1) {
+            await new Promise(res => setTimeout(res, RETRY_BASE_DELAY * (attempt + 1)));
+          }
+          attempt++;
+        }
+      }
+    }
+    throw new Error(`[ML-API] Falha após ${MAX_RETRIES} tentativas (${label})`);
+  }
 
   try {
     // 1. Tenta usar access token já existente do .env
@@ -678,17 +782,16 @@ async function buscarMercadoLivre(keyword = 'eletrônicos', limite = 10) {
     if (ML_ACCESS_TOKEN) {
       console.log('\n[MERCADO LIVRE OAuth] Usando access token existente do .env...');
       const response = await mlOAuthBreaker.execute(
-        () => axios.get(
-          'https://api.mercadolibre.com/sites/MLB/search',
-          {
-            params: queryParams,
-            headers: {
-              ...MERCADO_LIVRE_HEADERS,
-              'Authorization': `Bearer ${ML_ACCESS_TOKEN}`
-            },
-            timeout: 15000
-          }
-        ),
+        () => requestWithRetries({
+          method: 'get',
+          url: API_BASE_URL + SEARCH_ENDPOINT,
+          params: queryParams,
+          headers: {
+            ...MERCADO_LIVRE_HEADERS,
+            'Authorization': `Bearer ${ML_ACCESS_TOKEN}`
+          },
+          timeout: 15000
+        }, 'buscarMercadoLivreOAuth'),
         'buscarMercadoLivreOAuth'
       );
       if (response.data?.results && response.data.results.length > 0) {
@@ -701,29 +804,29 @@ async function buscarMercadoLivre(keyword = 'eletrônicos', limite = 10) {
     // 2. Se não houver token válido, gera via client_credentials
     if (ML_CLIENT_ID && ML_CLIENT_SECRET) {
       console.log('\n[MERCADO LIVRE OAuth] Gerando token de acesso...');
-      const tokenResponse = await axios.post(
-        'https://api.mercadolibre.com/oauth/token',
-        {
+      const tokenResponse = await requestWithRetries({
+        method: 'post',
+        url: API_BASE_URL + '/oauth/token',
+        data: {
           grant_type: 'client_credentials',
           client_id: ML_CLIENT_ID,
           client_secret: ML_CLIENT_SECRET
         },
-        { timeout: 10000 }
-      );
+        timeout: 10000
+      }, 'gerarToken');
       const token = tokenResponse.data.access_token;
       console.log('[OK] Token de acesso gerado');
       const response = await mlOAuthBreaker.execute(
-        () => axios.get(
-          'https://api.mercadolibre.com/sites/MLB/search',
-          {
-            params: queryParams,
-            headers: {
-              ...MERCADO_LIVRE_HEADERS,
-              'Authorization': `Bearer ${token}`
-            },
-            timeout: 15000
-          }
-        ),
+        () => requestWithRetries({
+          method: 'get',
+          url: API_BASE_URL + SEARCH_ENDPOINT,
+          params: queryParams,
+          headers: {
+            ...MERCADO_LIVRE_HEADERS,
+            'Authorization': `Bearer ${token}`
+          },
+          timeout: 15000
+        }, 'buscarMercadoLivreOAuth'),
         'buscarMercadoLivreOAuth'
       );
       if (response.data?.results && response.data.results.length > 0) {
@@ -822,8 +925,25 @@ function normalizarOfertas(shopee = [], mercadolivre = [], options = {}) {
     });
   });
 
-  // Normalizar Mercado Livre
+
+  // Normalizar Mercado Livre com validação e deduplicação aprimorada
+  const seenMl = new Set();
   mercadolivre.forEach((item) => {
+    // Validação de schema
+    const { error } = ofertaMlSchema.validate(item);
+    if (error) {
+      console.warn(`[ML][VALIDACAO] Oferta inválida descartada: ${error.message} | Produto: ${item.product_name || item.product_id}`);
+      return;
+    }
+
+    // Deduplicação por múltiplos campos (ID, nome, preço)
+    const dedupKey = `${item.product_id}|${item.product_name}|${item.price}`;
+    if (seenMl.has(dedupKey)) {
+      console.log(`[ML][DEDUP] Oferta duplicada descartada: ${item.product_name} (${item.product_id})`);
+      return;
+    }
+    seenMl.add(dedupKey);
+
     const linkOficialMapeado = obterLinkCurtoMercadoLivreMapeado(item);
     const poolFallbackPermitido = !strictMlMatch;
     const linkCurtoPool = poolFallbackPermitido && ehLinkMercadoLivreCurto(linksOficiaisMl[cursorLinkCurtoPool] || '')
@@ -853,6 +973,9 @@ function normalizarOfertas(shopee = [], mercadolivre = [], options = {}) {
       console.warn(`[ML] Produto descartado por divergencia entre item e source_link: ${item.product_name} (item=${productIdItem}, source=${productIdMapeado})`);
       return;
     }
+
+    // Log detalhado de transformação
+    console.log(`[ML][OK] Oferta validada e normalizada: ${item.product_name} (${item.product_id})`);
 
     ofertas.push({
       marketplace: item.marketplace,
@@ -1160,12 +1283,34 @@ async function executar() {
     const historico = carregarHistorico();
     console.log(`[HISTÓRICO] ${historico.offers.length} ofertas registradas`);
 
-    // 2. Buscar produtos (Shopee + Mercado Livre)
+
+    // 2. Buscar produtos (Shopee + Mercado Livre + Página Oficial)
     const produtosShopee = await buscarShopeeGraphQL(15);
-    const produtosML = await buscarMercadoLivre(ML_KEYWORD, 15);
+    const produtosMLApi = await buscarMercadoLivre(ML_KEYWORD, 15);
+    let produtosMLPagina = [];
+    try {
+      produtosMLPagina = await module.exports.buscarOfertasPaginaOficialML(15);
+    } catch (e) {
+      console.warn('[ML-OFERTAS] Falha ao buscar ofertas da página oficial:', e.message);
+    }
+
+    // Mesclar ofertas ML (API + Página)
+    const produtosML = [...produtosMLApi];
+    if (Array.isArray(produtosMLPagina) && produtosMLPagina.length > 0) {
+      // Evitar duplicatas por product_id ou link
+      const idsExistentes = new Set(produtosML.map(o => o.product_id || o.raw_link));
+      produtosMLPagina.forEach(o => {
+        const key = o.product_id || o.raw_link;
+        if (key && !idsExistentes.has(key)) {
+          produtosML.push(o);
+          idsExistentes.add(key);
+        }
+      });
+      console.log(`[MERCADO LIVRE] ${produtosMLPagina.length} ofertas adicionadas da página oficial.`);
+    }
 
     console.log(`[SHOPEE] ${produtosShopee.length} ofertas encontradas`);
-    console.log(`[MERCADO LIVRE] ${produtosML.length} produtos encontrados`);
+    console.log(`[MERCADO LIVRE] ${produtosML.length} produtos encontrados (API + Página Oficial)`);
 
     // 3. Normalizar
     const linksOficiaisMl = obterLinksMercadoLivreOficiais(produtosML.length);
@@ -1254,6 +1399,7 @@ async function executar() {
 
 module.exports = {
     buscarOfertasMercadoLivreIneditas,
+  buscarOfertasPaginaOficialML,
   executar,
   rankearOfertas,
   calcularScore,
@@ -1267,7 +1413,8 @@ module.exports = {
   selecionarLinksPoolRoundRobin,
   obterLinksMercadoLivreOficiais,
   avaliarSaudePoolLinks,
-  calcularCiclosPorJanela
+  calcularCiclosPorJanela,
+  ofertaMlSchema
 };
 
 // Se executado diretamente

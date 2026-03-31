@@ -1,3 +1,20 @@
+
+
+# Scripts de Inicialização
+
+O projeto possui scripts `.bat` para facilitar a operação no Windows:
+
+- **operacao-completa.bat**: Sobe o dashboard, abre o navegador e verifica a sessão do WhatsApp. **Este é o único recomendado para uso diário.**
+- **diagnostico.bat**: Executa diagnóstico do ambiente, dependências e arquivos principais. Útil para troubleshooting (opcional).
+- **iniciar.bat**: Sobe apenas o dashboard local (opcional).
+- **iniciar-auth.bat**: Executa apenas a autenticação do WhatsApp (opcional).
+
+> **Atenção:** Scripts legados como `validar-ml-lote.bat` foram removidos. Caso precise validar lotes manualmente, utilize diretamente os scripts JS de prevalidação conforme instruções abaixo ou consulte o histórico em `LIMPEZA-REALIZADA.md`.
+
+**Recomendação:** Use sempre `operacao-completa.bat` para iniciar o sistema completo. Os demais scripts são opcionais e normalmente não são necessários no dia a dia.
+
+> **Nota:** Não existem scripts `.sh` de inicialização. Toda a operação recomendada é via `.bat` no Windows ou comandos Node.js diretos descritos abaixo.
+
 # Radar de Ofertas
 
 Projeto de captura e disparo de ofertas via WhatsApp com dashboard operacional local.
@@ -15,29 +32,33 @@ Projeto de captura e disparo de ofertas via WhatsApp com dashboard operacional l
 
 Para garantir que ofertas do Mercado Livre sejam exportadas com link curto válido (meli.la), é necessário manter o arquivo `mercadolivre-linkbuilder-map.txt` atualizado.
 
+
 ### Gerar lote de produtos sem link curto para o Link Builder
 
-1. Gere um lote variado de produtos ML sem link curto:
-  ```powershell
-  node gerar-lote-linkbuilder-variado.js 100
-  ```
-  Isso criará o arquivo `ml-lote-linkbuilder-variado.txt` com até 100 códigos de produtos.
+1. Gere um lote variado de produtos ML sem link curto (recomendado):
+   ```powershell
+   node gerar-lote-linkbuilder-variado.js 100
+   ```
+   Isso criará o arquivo `ml-lote-linkbuilder-variado.txt` com até 100 códigos de produtos.
 
-2. (Opcional) Para garantir compatibilidade, converta os códigos em URLs:
-  - Formato: `https://www.mercadolivre.com.br/p/MLB12345678`
-  - Basta substituir cada linha do arquivo pelo formato acima.
+2. (Opcional/legado) Use `gerar-lote-linkbuilder.js` para lote simples, se necessário.
 
-3. Cole os links/códigos no Link Builder do Mercado Livre para gerar os links curtos.
+3. (Opcional) Para garantir compatibilidade, converta os códigos em URLs:
+   - Formato: `https://www.mercadolivre.com.br/p/MLB12345678`
+   - Basta substituir cada linha do arquivo pelo formato acima.
 
-4. Atualize o arquivo `mercadolivre-linkbuilder-map.txt` com os novos pares `código<TAB>link_curto`.
+4. Cole os links/códigos no Link Builder do Mercado Livre para gerar os links curtos.
 
-5. Repita o ciclo de exportação normalmente.
+5. Atualize o arquivo `mercadolivre-linkbuilder-map.txt` com os novos pares `código<TAB>link_curto`.
+
+6. Repita o ciclo de exportação normalmente.
 
 > **Dica:** O sistema só exporta ofertas ML com link curto válido presente no mapa. Sempre mantenha o mapeamento atualizado para ampliar a cobertura.
 
-## Execucao recomendada no Windows
 
-Entre na pasta do projeto e ative o Node portatil:
+## Execução manual (avançado)
+
+Se preferir executar manualmente, entre na pasta do projeto e ative o Node portátil:
 
 ```powershell
 cd "C:\Users\daniel.s.santos\Documents\Agents\Radar de Ofertas"
