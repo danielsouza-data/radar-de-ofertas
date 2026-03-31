@@ -1,60 +1,54 @@
+# Commit de teste para validar workflow Docker no GitHub Actions (2026)
 
 
-# Scripts de Inicialização
 
-O projeto possui scripts `.bat` para facilitar a operação no Windows:
+# Radar de Ofertas — Estrutura Otimizada (2026)
 
-- **operacao-completa.bat**: Sobe o dashboard, abre o navegador e verifica a sessão do WhatsApp. **Este é o único recomendado para uso diário.**
-- **diagnostico.bat**: Executa diagnóstico do ambiente, dependências e arquivos principais. Útil para troubleshooting (opcional).
-- **iniciar.bat**: Sobe apenas o dashboard local (opcional).
-- **iniciar-auth.bat**: Executa apenas a autenticação do WhatsApp (opcional).
+Este projeto realiza a captura, curadoria e disparo de ofertas multi-marketplace (Mercado Livre, Amazon, Shopee) com integração de sessões, cookies e credenciais persistentes. O sistema foi otimizado para manter apenas o núcleo funcional, histórico, logs, sessões e documentação.
 
-> **Atenção:** Scripts legados como `validar-ml-lote.bat` foram removidos. Caso precise validar lotes manualmente, utilize diretamente os scripts JS de prevalidação conforme instruções abaixo ou consulte o histórico em `LIMPEZA-REALIZADA.md`.
+## Como usar
 
-**Recomendação:** Use sempre `operacao-completa.bat` para iniciar o sistema completo. Os demais scripts são opcionais e normalmente não são necessários no dia a dia.
+1. **Pré-requisitos:**
+  - Node.js instalado (ou use o node portátil se disponível)
+  - Preencha o arquivo `.env` com suas credenciais e configurações
+  - Certifique-se de que os arquivos `ml-cookies.json` e `ml-access-token.json` estejam presentes para integração Mercado Livre
+  - Sessões WhatsApp são mantidas em `.wwebjs_sessions/` e `.wwebjs_cache/`
 
-> **Nota:** Não existem scripts `.sh` de inicialização. Toda a operação recomendada é via `.bat` no Windows ou comandos Node.js diretos descritos abaixo.
+2. **Execução principal:**
+  - O pipeline central está em `src/processador-ofertas.js`
+  - Os drivers de marketplaces estão em `src/marketplaces/`
+  - Para rodar manualmente:
+    ```bash
+    node src/processador-ofertas.js
+    ```
+  - O dashboard local pode ser acessado via arquivos em `public/` (ex: `public/dashboard.html`)
 
-# Radar de Ofertas
+3. **Logs e histórico:**
+  - Logs operacionais: `logs/`
+  - Histórico de ofertas: `data/`
 
-Projeto de captura e disparo de ofertas via WhatsApp com dashboard operacional local.
+4. **Restauração de arquivos antigos:**
+  - Todos os arquivos e scripts removidos foram movidos para `_backup_cleanup_2026/` no diretório raiz.
+  - Caso precise restaurar algum script legado, basta mover o arquivo desejado de `_backup_cleanup_2026/` de volta para o diretório principal.
 
+## Estrutura dos principais diretórios
 
-## Fluxo atual
+- `src/` — Lógica principal, drivers de marketplaces, utilitários, serviços
+- `data/` — Logs, históricos, arquivos de operação
+- `logs/` — Logs operacionais (vazio por padrão)
+- `public/` — Interface mínima (dashboard, APIs, monitor)
+- `.wwebjs_sessions/` e `.wwebjs_cache/` — Sessões e cache do WhatsApp
+- `_opensquad/` — Orquestração e memória Opensquad
+- `_backup_cleanup_2026/` — Backup dos arquivos removidos
 
-- Autenticacao da sessao WhatsApp: `autenticar-sessao.js`
-- Disparo oficial pontual: `disparo-completo.js`
-- Agendador oficial: `agendador-envios.js`
-- Dashboard local: `bin/dashboard-server.js`
-- Pipeline de ofertas: `src/processador-ofertas.js`
+## Observações importantes
 
-## Mercado Livre: Ampliação do Mapeamento de Links
+- **Atenção:** Scripts antigos, binários portáveis, dashboards legados e utilitários foram removidos para garantir segurança, performance e manutenção simplificada.
+- **Sessões, cookies e credenciais** foram preservados. Não compartilhe esses arquivos publicamente.
+- **Para restaurar qualquer funcionalidade antiga**, consulte `_backup_cleanup_2026/`.
+- **Documentação detalhada** sobre variáveis de ambiente, integrações e fluxo operacional está disponível nos arquivos `SECURITY.md`, `DOCKER.md`, `PROJECT_PORTABILITY.md` e `START.md`.
 
-Para garantir que ofertas do Mercado Livre sejam exportadas com link curto válido (meli.la), é necessário manter o arquivo `mercadolivre-linkbuilder-map.txt` atualizado.
-
-
-### Gerar lote de produtos sem link curto para o Link Builder
-
-1. Gere um lote variado de produtos ML sem link curto (recomendado):
-   ```powershell
-   node gerar-lote-linkbuilder-variado.js 100
-   ```
-   Isso criará o arquivo `ml-lote-linkbuilder-variado.txt` com até 100 códigos de produtos.
-
-2. (Opcional/legado) Use `gerar-lote-linkbuilder.js` para lote simples, se necessário.
-
-3. (Opcional) Para garantir compatibilidade, converta os códigos em URLs:
-   - Formato: `https://www.mercadolivre.com.br/p/MLB12345678`
-   - Basta substituir cada linha do arquivo pelo formato acima.
-
-4. Cole os links/códigos no Link Builder do Mercado Livre para gerar os links curtos.
-
-5. Atualize o arquivo `mercadolivre-linkbuilder-map.txt` com os novos pares `código<TAB>link_curto`.
-
-6. Repita o ciclo de exportação normalmente.
-
-> **Dica:** O sistema só exporta ofertas ML com link curto válido presente no mapa. Sempre mantenha o mapeamento atualizado para ampliar a cobertura.
-
+---
 
 ## Execução manual (avançado)
 
