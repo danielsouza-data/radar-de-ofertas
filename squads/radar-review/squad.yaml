@@ -1,0 +1,19 @@
+name: "Radar de Ofertas — Review Squad"
+code: radar-review
+description: >
+  Squad especializada em revisar o sistema Radar de Ofertas (bot WhatsApp de disparo automático
+  de ofertas) e entregar sugestões de melhoria em cinco perspectivas: confiabilidade, segurança,
+  qualidade, produto e arquitetura.
+language: Português (Brasil)
+version: "1.0.0"
+
+skills: []
+
+pipeline:
+  steps:
+    - sre-review
+    - security-review
+    - qa-review
+    - product-review
+    - architect-review
+    - consolidacao

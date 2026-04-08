@@ -1,0 +1,51 @@
+{
+  "squad": "radar-review",
+  "status": "completed",
+  "step": { "current": 6, "total": 6, "label": "consolidacao" },
+  "agents": [
+    {
+      "id": "sre",
+      "name": "Engenheiro de Confiabilidade",
+      "icon": "🛡️",
+      "status": "done",
+      "deliverTo": null,
+      "desk": { "col": 1, "row": 1 }
+    },
+    {
+      "id": "security",
+      "name": "Especialista em Segurança",
+      "icon": "🔐",
+      "status": "done",
+      "deliverTo": null,
+      "desk": { "col": 2, "row": 1 }
+    },
+    {
+      "id": "qa",
+      "name": "Especialista em Qualidade",
+      "icon": "🧪",
+      "status": "done",
+      "deliverTo": null,
+      "desk": { "col": 3, "row": 1 }
+    },
+    {
+      "id": "product",
+      "name": "Estrategista de Produto",
+      "icon": "🚀",
+      "status": "done",
+      "deliverTo": null,
+      "desk": { "col": 1, "row": 2 }
+    },
+    {
+      "id": "architect",
+      "name": "Arquiteto de Software",
+      "icon": "🏗️",
+      "status": "done",
+      "deliverTo": null,
+      "desk": { "col": 2, "row": 2 }
+    }
+  ],
+  "handoff": null,
+  "startedAt": "2026-04-08T14:58:00.000Z",
+  "updatedAt": "2026-04-08T15:05:10.000Z",
+  "completedAt": "2026-04-08T15:05:10.000Z"
+}
