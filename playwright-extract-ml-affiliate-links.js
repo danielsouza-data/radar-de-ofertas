@@ -12,36 +12,45 @@ async function main() {
     process.exit(1);
   }
 
-  const browser = await chromium.launch({ headless: false });
-  const page = await browser.newPage();
+  const isCI = process.env.CI === 'true';
+  const browser = await chromium.launch({ 
+    headless: isCI,
+    args: [
+      '--disable-web-security',
+      '--disable-features=IsolateOrigins,site-per-process',
+      isCI ? '--no-sandbox' : '',
+      isCI ? '--disable-setuid-sandbox' : '',
+      '--disable-dev-shm-usage',
+      '--mute-audio'
+    ].filter(Boolean)
+  });
+  
+  const context = await browser.newContext({
+    permissions: [],
+    javaScriptEnabled: true
+  });
 
-  // Carrega cookies de sessão se existir o arquivo cookies.json ou ml-cookies.json
-  let cookiesPath = 'cookies.json';
-  if (!fs.existsSync(cookiesPath) && fs.existsSync('ml-cookies.json')) {
-    cookiesPath = 'ml-cookies.json';
-  }
-  if (fs.existsSync(cookiesPath)) {
+  const page = await context.newPage();
+
+  // Carrega cookies de sessão
+  const results = [];
+  let cookiesPath = fs.existsSync('ml-cookies.json') ? 'ml-cookies.json' : 
+                    fs.existsSync('cookies.json') ? 'cookies.json' : null;
+
+  if (cookiesPath) {
     let cookies = JSON.parse(fs.readFileSync(cookiesPath, 'utf8'));
-    // Playwright espera domínio sem subdomínio inicial para cookies cross-site
     cookies = cookies.map(c => {
       if (c.domain && c.domain.startsWith('.')) {
         c.domain = c.domain.replace(/^\./, '');
       }
-  const results = [];
-      // Carrega cookies de sessão se existir o arquivo cookies.json ou ml-cookies.json
-      let cookiesLoaded = false;
-      let cookiesPath = null;
-      if (fs.existsSync('ml-cookies.json')) {
-        cookiesPath = 'ml-cookies.json';
-      } else if (fs.existsSync('cookies.json')) {
-        cookiesPath = 'cookies.json';
-      }
-      if (cookiesPath) {
-        const cookies = JSON.parse(fs.readFileSync(cookiesPath, 'utf8'));
-        await page.context().addCookies(cookies);
-        cookiesLoaded = true;
-        console.log(`Cookies de sessão carregados de ${cookiesPath}.`);
-      }
+      return c;
+    });
+    await context.addCookies(cookies);
+    console.log(`Cookies de sessão carregados de ${cookiesPath}.`);
+  }
+
+  await page.goto(url, { waitUntil: 'domcontentloaded' });
+  const cardHandles = await page.$$('.ui-search-layout__item');
 
   for (let i = 0; i < cardHandles.length; i++) {
     const card = cardHandles[i];

@@ -489,7 +489,19 @@ function ehLinkMercadoLivreUtil(raw = '') {
 
 function mapearResultadosMercadoLivre(results = []) {
   return results
-    .filter(item => item.id && item.title && item.price)
+    .filter(item => {
+      if (!item.id || !item.title || !item.price) return false;
+      
+      const precoAtual = Number(item.price || 0);
+      const precoOriginalApi = Number(item.original_price || 0);
+      const precoOriginal = precoOriginalApi > precoAtual ? precoOriginalApi : precoAtual;
+      
+      if (precoOriginal <= 0) return false;
+      const discountRatio = (precoOriginal - precoAtual) / precoOriginal;
+      
+      // Filtro Anti-Fadiga Curatorial: Desconto > 30%
+      return discountRatio >= 0.30;
+    })
     .map(item => {
       let slug = 'produto';
       try {
@@ -687,7 +699,12 @@ async function buscarShopeeGraphQL(limite = 10) {
         image_url: p.imageUrl || '',
         sales: p.sales || 0,
         discount_rate: parseFloat(p.priceDiscountRate || 0)
-      }));
+      })).filter(o => {
+        if (!o.original_price || o.original_price <= 0) return false;
+        const discountRatio = (o.original_price - o.price) / o.original_price;
+        // Filtro Anti-Fadiga Curatorial: Desconto > 30%
+        return discountRatio >= 0.30;
+      });
     }
 
     if (todasOfertas.length > 0) {
@@ -747,6 +764,27 @@ async function buscarMercadoLivre(keyword = 'eletrônicos', limite = 10) {
           const retryAfter = Number(error.response.headers['retry-after'] || 2);
           console.warn(`[ML-API] Rate limit atingido. Aguardando ${retryAfter}s antes de tentar novamente...`);
           await new Promise(res => setTimeout(res, retryAfter * 1000));
+          attempt++;
+        } else if (error.response && error.response.status === 401) {
+          console.warn(`[ML-API] Token expirado ou invalido (401). Renovando...`);
+          if (ML_CLIENT_ID && ML_CLIENT_SECRET) {
+            try {
+              const tokenResponse = await axios.post('https://api.mercadolibre.com/oauth/token', {
+                grant_type: 'client_credentials',
+                client_id: ML_CLIENT_ID,
+                client_secret: ML_CLIENT_SECRET
+              });
+              const newToken = tokenResponse.data.access_token;
+              process.env.MERCADO_LIVRE_ACCESS_TOKEN = newToken;
+              if (config.headers) {
+                config.headers['Authorization'] = `Bearer ${newToken}`;
+              }
+              console.log('[OK] Novo Token gerado no fallback 401.');
+            } catch (authErr) {
+              console.warn(`[ML-API] Falha ao renovar token 401: ${authErr.message}`);
+            }
+          }
+          await new Promise(res => setTimeout(res, 1000));
           attempt++;
         } else {
           // Log detalhado de falha

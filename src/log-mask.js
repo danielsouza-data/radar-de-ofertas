@@ -24,6 +24,13 @@ function getSensitiveValues() {
 
 function maskString(str, sensitiveValues) {
   let result = String(str);
+
+  // Mascaramento de Telefone (BR) / WhatsApp PII
+  // Mascaramento de numeros de WhatsApp (Ex: 5511999998888@c.us)
+  result = result.replace(/(55\d{2})9?(\d{4})(\d{4})@c\.us/g, '$1****$3@c.us');
+  // Mascaramento de formato BR formatado: +55 (11) 99999-8888
+  result = result.replace(/\+55\s*\(?(\d{2})\)?\s*9?(\d{4})-?(\d{4})/g, '+55 ($1) ****-$3');
+
   for (const val of sensitiveValues) {
     // Substitui todas as ocorrencias exatas pelo mesmo comprimento de asteriscos
     const stars = '*'.repeat(Math.min(val.length, 12));
